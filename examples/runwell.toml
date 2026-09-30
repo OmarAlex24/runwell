@@ -1,4 +1,4 @@
-# Illustrative configuration; M0 commands do not start services.
+# Standalone Linux node configuration. Templates and state require a local disk.
 # Budgets exclude OS/daemon headroom. No credentials are stored in this file.
 schema_version = 1
 
@@ -43,3 +43,30 @@ private_key_file = "/run/credentials/runwell/github-app.pem"
 ca_file = "/etc/runwell/tls/ca.pem"
 certificate_file = "/etc/runwell/tls/identity.pem"
 private_key_file = "/run/credentials/runwell/tls-key.pem"
+
+# Run with: runwell node --config runwell.toml --standalone
+# Create this dedicated account first; keep it out of the docker group.
+[standalone]
+max_jobs = 8
+runner_user = "runwell-runner"
+templates_dir = "/var/lib/runwell/templates"
+runners_dir = "/var/lib/runwell/runners"
+drain_seconds = 3600
+stop_seconds = 120
+idle_seconds = 180
+reconcile_seconds = 5
+runner_group_id = 1
+
+[standalone.overcommit]
+cpu = 1.0
+memory = 1.0
+
+[standalone.ci]
+cpu_weight = 100
+memory_max_bytes = 19327352832
+
+[standalone.runner]
+version = "2.337.0"
+# sha256 = "<64 hex digits>" # Otherwise verified against release notes; fail closed.
+# Updates: warn after 21 days, refresh at 25, refuse stale templates at 30.
+# Alternatively use github.auth kind = "pat_env", token_env = "RUNWELL_GITHUB_TOKEN".

@@ -1,47 +1,143 @@
-//! SQLite journal and final job measurements for runwell.
-//!
-//! SQLite is the source of truth for durable runner identities and transition
-//! records. Use WAL with one writer connection; never mix SQLite binding crates.
-
+//! WAL SQLite journal with migrations and one serialized writer task.
+//! Write-ahead runner identities and durable cleanup markers make restart and
+//! redelivery safe. No API accepts JIT credentials or authentication material.
 #![deny(missing_docs)]
+mod model;
+mod read;
+mod writer;
+pub use model::*;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use std::{str::FromStr, time::Duration};
+use tokio::sync::{mpsc, oneshot};
+use writer::{Command, Mutation};
 
-/// Durable job measurement record, distinct from live Prometheus samples.
-#[derive(Debug, Clone, Copy)]
-pub struct JobMeasurement {
-    /// GitHub runner request identity.
-    pub request_id: i64,
-    /// Cumulative CPU time in microseconds.
-    pub cpu_usec: u64,
-    /// Peak memory use in bytes.
-    pub memory_peak: u64,
-}
-
-/// Persistence boundary using a sqlx SQLite pool.
+/// Cloneable persistence boundary. Dropping all handles drains the writer queue.
+#[derive(Clone)]
 pub struct Store {
     pool: sqlx::SqlitePool,
+    writer: mpsc::Sender<Command>,
 }
-
 impl Store {
-    /// Open and migrate the SQLite journal; currently unimplemented.
-    pub async fn open(_database_url: &str) -> Result<Self, Error> {
-        Err(Error::Unimplemented)
+    /// Open/migrate a database in WAL mode with FULL crash durability.
+    pub async fn open(database_url: &str) -> Result<Self, Error> {
+        let options = SqliteConnectOptions::from_str(database_url)
+            .map_err(|_| Error::Database)?
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Full)
+            .busy_timeout(Duration::from_secs(10));
+        // One held writer plus read connections. A single-connection in-memory DB
+        // would deadlock; tests use a temporary file, exercising actual WAL.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(options)
+            .await?;
+        sqlx::migrate!()
+            .run(&pool)
+            .await
+            .map_err(|_| Error::Database)?;
+        let connection = pool.acquire().await?;
+        let (writer, receiver) = mpsc::channel(64);
+        tokio::spawn(writer::run(connection, receiver));
+        Ok(Self { pool, writer })
     }
-
-    /// Access the pool for future focused repositories.
-    pub fn pool(&self) -> &sqlx::SqlitePool {
-        &self.pool
+    async fn write(&self, mutation: Mutation) -> Result<i64, Error> {
+        let (reply, receive) = oneshot::channel();
+        self.writer
+            .send(Command { mutation, reply })
+            .await
+            .map_err(|_| Error::Closed)?;
+        receive.await.map_err(|_| Error::Closed)?
     }
-
-    /// Persist final measurements idempotently; currently unimplemented.
-    pub async fn record(&self, _measurement: &JobMeasurement) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+    /// Insert demand once and return its stable local identity.
+    pub async fn queue(&self, job: NewJob) -> Result<i64, Error> {
+        self.write(Mutation::Queue(job)).await
+    }
+    /// Apply an explicit legal transition; repeating the current state is a no-op.
+    pub async fn transition(&self, id: i64, state: State) -> Result<(), Error> {
+        self.write(Mutation::Transition(id, state))
+            .await
+            .map(|_| ())
+    }
+    /// Persist unique identity before creating a remote runner.
+    pub async fn runner_intent(&self, runner: Runner) -> Result<(), Error> {
+        self.write(Mutation::Intent(runner)).await.map(|_| ())
+    }
+    /// Update an unlaunched reservation to the current immutable template.
+    /// Agent identity and execution states make this illegal after registration.
+    pub async fn retarget_template(&self, id: i64, version: String) -> Result<(), Error> {
+        self.write(Mutation::Retarget(id, version))
+            .await
+            .map(|_| ())
+    }
+    /// Journal acquisition before generating JIT credentials.
+    pub async fn acquired(&self, id: i64) -> Result<(), Error> {
+        self.write(Mutation::Acquired(id)).await.map(|_| ())
+    }
+    /// Persist the agent ID and RunnerCreated state atomically.
+    pub async fn registered(&self, id: i64, agent: i64) -> Result<(), Error> {
+        self.write(Mutation::Registered(id, agent))
+            .await
+            .map(|_| ())
+    }
+    /// Bind execution to the actual GitHub request, which can differ from acquisition.
+    pub async fn bind(
+        &self,
+        id: i64,
+        execution: Execution,
+        outcome: Option<String>,
+    ) -> Result<(), Error> {
+        self.write(Mutation::Bind(id, execution, outcome))
+            .await
+            .map(|_| ())
+    }
+    /// Persist the main process exit before remote deletion or service collection.
+    pub async fn exited(&self, id: i64, code: Option<i32>) -> Result<(), Error> {
+        self.write(Mutation::Exited(id, code)).await.map(|_| ())
+    }
+    /// Remember successful remote removal before local destructive cleanup.
+    pub async fn remote_deleted(&self, id: i64) -> Result<(), Error> {
+        self.write(Mutation::Deleted(id)).await.map(|_| ())
+    }
+    /// Mark local cleanup complete; requires a terminal state and remote removal.
+    pub async fn cleaned(&self, id: i64) -> Result<(), Error> {
+        self.write(Mutation::Cleaned(id)).await.map(|_| ())
+    }
+    /// Commit the final sample once, before stopping its cgroup.
+    pub async fn record(&self, measurement: &JobMeasurement) -> Result<(), Error> {
+        self.write(Mutation::Measure(measurement.clone()))
+            .await
+            .map(|_| ())
+    }
+    /// Record the last successfully acknowledged ID. Call after remote ack.
+    pub async fn acked(&self, set: i64, message: i64) -> Result<(), Error> {
+        self.write(Mutation::Ack(set, message)).await.map(|_| ())
     }
 }
-
-/// An operation that has not been implemented in this milestone.
+/// Sanitized journal errors; SQL and bound data are never formatted.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The public interface is reserved for a later milestone.
-    #[error("this operation is not implemented in the M0 bootstrap")]
-    Unimplemented,
+    /// SQLite or migration error.
+    #[error("journal operation failed")]
+    Database,
+    /// Illegal state transition or missing lifecycle prerequisite.
+    #[error("illegal journal state transition")]
+    Transition,
+    /// Writer task unavailable.
+    #[error("journal writer is closed")]
+    Closed,
+    /// Invalid durable data.
+    #[error("invalid journal data")]
+    Corrupt,
+}
+impl From<sqlx::Error> for Error {
+    fn from(error: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(ref e) = error
+            && e.message() == "illegal job state transition"
+        {
+            return Self::Transition;
+        }
+        Self::Database
+    }
 }

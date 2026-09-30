@@ -11,8 +11,24 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+tokio.workspace = true
+secrecy.workspace = true
+tracing.workspace = true
+jiff.workspace = true
+futures-util = "=0.3.34"
+runwell-config = { version = "=0.1.0", path = "../runwell-config" }
+runwell-admission = { version = "=0.1.0", path = "../runwell-admission" }
+runwell-store = { version = "=0.1.0", path = "../runwell-store" }
+runwell-runner = { version = "=0.1.0", path = "../runwell-runner" }
+runwell-scaleset = { version = "=0.1.0", path = "../runwell-scaleset" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus.workspace = true
 zbus_systemd.workspace = true
 rustix.workspace = true
+
+[dev-dependencies]
+wiremock = "=0.6.5"
+tempfile = "=3.27.0"
+serde_json.workspace = true
+base64 = "=0.22.1"

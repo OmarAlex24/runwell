@@ -4,6 +4,7 @@
 //! read-only host discovery; unfinished commands report their status and exit
 //! with code 2 without starting a runner, opening sockets, or modifying state.
 
+mod node;
 mod simulate;
 
 use clap::{Parser, Subcommand};
@@ -24,7 +25,7 @@ enum Command {
     /// Run the scale-set controller and scheduler.
     Controller,
     /// Run a Linux host execution node.
-    Node,
+    Node(node::Node),
     /// Explain CI latency using GitHub workflow history.
     Report(Box<runwell_report::ReportArgs>),
     /// Replay a recorded job trace against scheduling policies.
@@ -58,7 +59,15 @@ async fn dispatch(command: Command) -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Command::Controller => "controller",
-        Command::Node => "node",
+        Command::Node(args) => {
+            return match args.run().await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runwell node: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Command::Report(args) => {
             return match runwell_report::execute(&args).await {
                 Ok(text) => {

@@ -8,6 +8,10 @@
 use serde::Deserialize;
 use std::{collections::HashSet, path::PathBuf};
 
+mod standalone;
+mod validation;
+pub use standalone::{CiLimits, Overcommit, RunnerConfig, StandaloneConfig};
+
 /// Complete configuration; call validate before using manually constructed values.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,7 +25,9 @@ pub struct Config {
     /// GitHub scope and authentication files.
     pub github: GithubConfig,
     /// Mutual TLS identity and trust roots.
-    pub transport: TransportConfig,
+    pub transport: Option<TransportConfig>,
+    /// Local controller/node wiring; required with --standalone.
+    pub standalone: Option<StandaloneConfig>,
 }
 
 /// Controller configuration.
@@ -48,6 +54,12 @@ pub struct JobClass {
     pub memory_max_bytes: u64,
     /// Systemd CPUWeight in the range 1 through 10000.
     pub cpu_weight: u32,
+    /// Additional routing labels (the class name is always included).
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Task ceiling for the entire job cgroup.
+    #[serde(default = "default_tasks")]
+    pub tasks_max: u64,
 }
 
 /// Per-host capacity after reserving headroom for the OS and daemon.
@@ -74,6 +86,13 @@ pub struct PsiConfig {
     pub pause_percent: f64,
     /// Resume below this strictly lower threshold.
     pub resume_percent: f64,
+    /// CPU high/low overrides; defaults to the shared thresholds.
+    pub cpu: Option<PressureThreshold>,
+    /// I/O high/low overrides; defaults to the shared thresholds.
+    pub io: Option<PressureThreshold>,
+    /// Minimum time in each brake state and sustained recovery time.
+    #[serde(default = "default_dwell")]
+    pub dwell_seconds: u64,
 }
 
 /// GitHub scope and authentication.
@@ -99,6 +118,20 @@ pub enum AuthConfig {
         /// PEM private key, preferably delivered through systemd credentials.
         private_key_file: PathBuf,
     },
+    /// App key read from an environment variable.
+    AppEnv {
+        /// App identity.
+        app_id: u64,
+        /// Installation identity.
+        installation_id: u64,
+        /// Environment variable containing the PEM.
+        private_key_env: String,
+    },
+    /// PAT read from an environment variable.
+    PatEnv {
+        /// Environment variable containing the PAT.
+        token_env: String,
+    },
     /// PAT authentication.
     Pat {
         /// File containing the PAT.
@@ -122,110 +155,25 @@ pub struct TransportConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Invalid TOML syntax or schema.
-    #[error("invalid TOML configuration: {0}")]
-    Parse(#[from] toml::de::Error),
+    #[error("invalid TOML configuration (source redacted)")]
+    Parse,
     /// Invalid configuration values.
     #[error("invalid configuration: {0}")]
     Validation(String),
 }
 
-impl Config {
-    /// Parse TOML and validate its values without reading credential files.
-    pub fn from_toml(source: &str) -> Result<Self, Error> {
-        let config: Self = toml::from_str(source)?;
-        config.validate()?;
-        Ok(config)
-    }
-
-    /// Reject invalid reservations, ambiguous classes, paths, and PSI thresholds.
-    pub fn validate(&self) -> Result<(), Error> {
-        require(self.schema_version == 1, "schema_version must be 1")?;
-        require(!self.node.id.trim().is_empty(), "node.id must not be empty")?;
-        require(self.node.cpu_slots > 0, "node.cpu_slots must be positive")?;
-        require(
-            self.node.memory_bytes > 0,
-            "node.memory_bytes must be positive",
-        )?;
-        let psi = &self.node.psi;
-        require(
-            psi.resume_percent.is_finite()
-                && psi.pause_percent.is_finite()
-                && psi.resume_percent >= 0.0
-                && psi.resume_percent < psi.pause_percent
-                && psi.pause_percent <= 100.0,
-            "PSI thresholds must satisfy 0 <= resume_percent < pause_percent <= 100",
-        )?;
-        require(
-            self.github.config_url.starts_with("https://")
-                && self.github.config_url.len() > "https://".len(),
-            "github.config_url must be a nonempty HTTPS URL",
-        )?;
-        require(
-            !self.controller.classes.is_empty(),
-            "controller.classes must not be empty",
-        )?;
-        let mut names = HashSet::new();
-        for class in &self.controller.classes {
-            require(
-                !class.name.is_empty()
-                    && class
-                        .name
-                        .bytes()
-                        .all(|c| c.is_ascii_alphanumeric() || c == b'-')
-                    && names.insert(&class.name),
-                "class names must be unique, nonempty, and contain only letters, digits, or hyphens",
-            )?;
-            require(
-                class.cpu_slots > 0 && class.cpu_slots <= self.node.cpu_slots,
-                "class CPU reservation must be positive and fit the node budget",
-            )?;
-            require(
-                class.memory_high_bytes > 0
-                    && class.memory_high_bytes <= class.memory_max_bytes
-                    && class.memory_max_bytes <= self.node.memory_bytes,
-                "class memory must satisfy 0 < memory_high_bytes <= memory_max_bytes <= node budget",
-            )?;
-            require(
-                (1..=10000).contains(&class.cpu_weight),
-                "cpu_weight must be between 1 and 10000",
-            )?;
-        }
-        for path in [
-            &self.controller.database,
-            &self.node.state_dir,
-            &self.transport.ca_file,
-            &self.transport.certificate_file,
-            &self.transport.private_key_file,
-        ] {
-            require(path.is_absolute(), "state and TLS paths must be absolute")?;
-        }
-        match &self.github.auth {
-            AuthConfig::App {
-                app_id,
-                installation_id,
-                private_key_file,
-            } => {
-                require(
-                    *app_id > 0 && *installation_id > 0,
-                    "App and installation IDs must be positive",
-                )?;
-                require(
-                    private_key_file.is_absolute(),
-                    "App private key path must be absolute",
-                )?;
-            }
-            AuthConfig::Pat { token_file } => {
-                require(token_file.is_absolute(), "PAT file path must be absolute")?;
-            }
-        }
-        Ok(())
-    }
+/// Per-resource pressure thresholds, in percent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PressureThreshold {
+    /// Pause at or above this value.
+    pub high: f64,
+    /// Resume below this value.
+    pub low: f64,
 }
-
-fn require(valid: bool, message: &str) -> Result<(), Error> {
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::Validation(message.to_owned()))
-    }
+fn default_tasks() -> u64 {
+    4096
+}
+fn default_dwell() -> u64 {
+    30
 }

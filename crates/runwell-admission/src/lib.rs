@@ -92,4 +92,10 @@ pub enum Error {
     /// Multipliers must be finite and positive.
     #[error("overcommit factors must be finite and positive")]
     InvalidFactor,
+    /// PSI thresholds or dwell time are invalid.
+    #[error("invalid PSI thresholds or dwell time")]
+    InvalidPressure,
 }
+
+mod host;
+pub use host::{HostAdmission, Pressure, PsiBrake, Threshold};

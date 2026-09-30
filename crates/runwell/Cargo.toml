@@ -19,3 +19,7 @@ runwell-trace = { version = "=0.1.0", path = "../runwell-trace" }
 runwell-advise = { version = "=0.1.0", path = "../runwell-advise" }
 serde_json.workspace = true
 toml.workspace = true
+
+runwell-node = { version = "=0.1.0", path = "../runwell-node" }
+runwell-config = { version = "=0.1.0", path = "../runwell-config" }
+tracing-subscriber.workspace = true

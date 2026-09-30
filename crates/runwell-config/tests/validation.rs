@@ -71,3 +71,19 @@ token_file = "/run/credentials/runwell/github-token""#,
     let config = Config::from_toml(&source).expect("PAT example should validate");
     assert!(matches!(config.github.auth, AuthConfig::Pat { .. }));
 }
+
+#[test]
+fn standalone_secrets_errors_and_limits_fail_closed() {
+    let mut config = Config::from_toml(EXAMPLE).unwrap();
+    config.standalone.as_mut().unwrap().runner_user = "root".into();
+    assert!(config.validate().is_err());
+    config.standalone.as_mut().unwrap().runner_user = "runner".into();
+    config.standalone.as_mut().unwrap().overcommit.cpu = f64::NAN;
+    assert!(config.validate().is_err());
+    let source = EXAMPLE.replace(
+        "schema_version = 1",
+        "schema_version = 1\nsecret = 'never-echo-me'",
+    );
+    let error = Config::from_toml(&source).unwrap_err();
+    assert!(!format!("{error:?} {error}").contains("never-echo-me"));
+}
