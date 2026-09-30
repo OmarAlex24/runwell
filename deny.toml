@@ -26,6 +26,12 @@ allow = [
     "Zlib",
 ]
 
+# option-ext (via dirs) is MPL-2.0: file-level copyleft, compatible with
+# MIT/Apache binaries as long as its sources are unmodified. Scoped to it only.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
