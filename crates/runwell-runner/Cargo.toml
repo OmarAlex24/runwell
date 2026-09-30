@@ -1,0 +1,14 @@
+[package]
+name = "runwell-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Verified runner templates, direct launch, and release management for runwell."
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+secrecy.workspace = true

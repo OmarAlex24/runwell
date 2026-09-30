@@ -1,0 +1,17 @@
+[package]
+name = "runwell-github"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "GitHub REST access and GitHub App or PAT authentication for runwell."
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde_json.workspace = true
+jsonwebtoken.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "runwell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Capacity-aware ephemeral GitHub Actions runners on owned Linux hosts"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true

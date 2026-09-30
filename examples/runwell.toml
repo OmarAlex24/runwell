@@ -1,0 +1,45 @@
+# Illustrative configuration; M0 commands do not start services.
+# Budgets exclude OS/daemon headroom. No credentials are stored in this file.
+schema_version = 1
+
+[controller]
+database = "/var/lib/runwell/runwell.sqlite"
+
+[[controller.classes]]
+name = "runwell-small"
+cpu_slots = 1
+memory_high_bytes = 2147483648
+memory_max_bytes = 3221225472
+cpu_weight = 100
+
+[[controller.classes]]
+name = "runwell-large"
+cpu_slots = 4
+memory_high_bytes = 8589934592
+memory_max_bytes = 10737418240
+cpu_weight = 200
+
+[node]
+id = "node-1"
+state_dir = "/var/lib/runwell"
+cpu_slots = 8
+memory_bytes = 17179869184
+
+[node.psi]
+pause_percent = 10.0
+resume_percent = 5.0
+
+[github]
+config_url = "https://github.com/example-org"
+
+[github.auth]
+kind = "app"
+app_id = 1
+installation_id = 1
+private_key_file = "/run/credentials/runwell/github-app.pem"
+# Alternative: kind = "pat" with token_file instead of App fields.
+
+[transport]
+ca_file = "/etc/runwell/tls/ca.pem"
+certificate_file = "/etc/runwell/tls/identity.pem"
+private_key_file = "/run/credentials/runwell/tls-key.pem"

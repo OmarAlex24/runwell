@@ -1,0 +1,16 @@
+/target/
+.DS_Store
+*.swp
+*.swo
+.env
+.env.*
+*.pem
+*.key
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+# JIT runner credentials and local execution state.
+.runner
+.credentials*
+/runwell.local.toml
+/.runwell/

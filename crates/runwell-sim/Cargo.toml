@@ -1,0 +1,14 @@
+[package]
+name = "runwell-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Deterministic job-trace replay against scheduling policies for runwell."
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+runwell-scheduler = { version = "=0.1.0", path = "../runwell-scheduler" }

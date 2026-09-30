@@ -1,0 +1,16 @@
+[package]
+name = "runwell-trace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Versioned job-trace records shared by runwell report and runwell simulate."
+
+[lints]
+workspace = true
+
+[dependencies]
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
