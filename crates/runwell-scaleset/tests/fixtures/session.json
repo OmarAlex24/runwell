@@ -1,0 +1,1 @@
+{"sessionId":"11111111-1111-4111-8111-111111111111","ownerName":"test-owner","runnerScaleSet":{"id":42,"name":"test-set"},"messageQueueUrl":"http://localhost/queue?partition=synthetic","messageQueueAccessToken":"synthetic-queue-token","statistics":{"totalAssignedJobs":7,"totalRunningJobs":3}}

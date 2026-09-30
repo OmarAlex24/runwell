@@ -1,0 +1,14 @@
+{
+  "messageId": 0,
+  "messageType": "RunnerScaleSetJobMessages",
+  "body": "[{\"runnerRequestId\": 987654321, \"repositoryName\": \"example-repo\", \"ownerName\": \"example-org\", \"jobId\": \"22222222-2222-4222-8222-222222222222\", \"jobWorkflowRef\": \"example-org/example-repo/.github/workflows/ci.yml@refs/heads/main\", \"jobDisplayName\": \"build\", \"workflowRunId\": 123, \"eventName\": \"push\", \"requestLabels\": [\"test-set\"], \"queueTime\": \"2026-01-01T00:00:01Z\", \"scaleSetAssignTime\": \"0001-01-01T00:00:00\", \"runnerAssignTime\": \"0001-01-01T00:00:00Z\", \"finishTime\": \"\", \"messageType\": \"JobAvailable\", \"acquireJobUrl\": \"https://example.invalid/acquire\"}, {\"runnerRequestId\": 987654321, \"repositoryName\": \"example-repo\", \"ownerName\": \"example-org\", \"jobId\": \"22222222-2222-4222-8222-222222222222\", \"jobWorkflowRef\": \"example-org/example-repo/.github/workflows/ci.yml@refs/heads/main\", \"jobDisplayName\": \"build\", \"workflowRunId\": 123, \"eventName\": \"push\", \"requestLabels\": [\"test-set\"], \"queueTime\": \"2026-01-01T00:00:01Z\", \"scaleSetAssignTime\": \"0001-01-01T00:00:00\", \"runnerAssignTime\": \"0001-01-01T00:00:00Z\", \"finishTime\": \"\", \"messageType\": \"JobAssigned\"}, {\"runnerRequestId\": 987654321, \"repositoryName\": \"example-repo\", \"ownerName\": \"example-org\", \"jobId\": \"22222222-2222-4222-8222-222222222222\", \"jobWorkflowRef\": \"example-org/example-repo/.github/workflows/ci.yml@refs/heads/main\", \"jobDisplayName\": \"build\", \"workflowRunId\": 123, \"eventName\": \"push\", \"requestLabels\": [\"test-set\"], \"queueTime\": \"2026-01-01T00:00:01Z\", \"scaleSetAssignTime\": \"0001-01-01T00:00:00\", \"runnerAssignTime\": \"0001-01-01T00:00:00Z\", \"finishTime\": \"\", \"messageType\": \"JobStarted\", \"runnerId\": 1234, \"runnerName\": \"test-runner\"}, {\"runnerRequestId\": 987654321, \"repositoryName\": \"example-repo\", \"ownerName\": \"example-org\", \"jobId\": \"22222222-2222-4222-8222-222222222222\", \"jobWorkflowRef\": \"example-org/example-repo/.github/workflows/ci.yml@refs/heads/main\", \"jobDisplayName\": \"build\", \"workflowRunId\": 123, \"eventName\": \"push\", \"requestLabels\": [\"test-set\"], \"queueTime\": \"2026-01-01T00:00:01Z\", \"scaleSetAssignTime\": \"0001-01-01T00:00:00\", \"runnerAssignTime\": \"0001-01-01T00:00:00Z\", \"finishTime\": \"\", \"messageType\": \"JobCompleted\", \"runnerId\": 1234, \"runnerName\": \"test-runner\", \"result\": \"succeeded\"}]",
+  "statistics": {
+    "totalAvailableJobs": 8,
+    "totalAcquiredJobs": 5,
+    "totalAssignedJobs": 7,
+    "totalRunningJobs": 3,
+    "totalRegisteredRunners": 5,
+    "totalBusyRunners": 3,
+    "totalIdleRunners": 2
+  }
+}
