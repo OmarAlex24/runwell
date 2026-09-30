@@ -132,7 +132,12 @@ async fn memory_max_kills_oversized_process_and_records_oom() {
     let id = 8_000_002;
     backend
         .start_probe(
-            limits(id, 32 * 1024 * 1024),
+            // MemoryHigh below MemoryMax throttles the allocation instead of letting it
+            // reach the OOM killer within the test window.
+            SliceSpec {
+                memory_high: 32 * 1024 * 1024,
+                ..limits(id, 32 * 1024 * 1024)
+            },
             "/usr/bin/python3",
             vec![
                 "/usr/bin/python3".into(),

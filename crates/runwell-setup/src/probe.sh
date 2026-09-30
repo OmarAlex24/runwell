@@ -239,8 +239,10 @@ field docker_root_dir
 if [ "$docker" = true ] && [ "$linux" = true ]; then docker_root=$(read_privileged docker info --format '{{.DockerRootDir}}'); else docker_root=''; fi
 string "$docker_root" 'Docker daemon unavailable or access denied'; comma
 field docker_root_usage_bytes
-if [ -n "$docker_root" ]; then usage=$(read_privileged du -sk "$docker_root" | awk '{printf "%.0f",$1*1024}'); else usage=''; fi
-number "$usage" 'Docker root unavailable or unreadable'; comma
+# du over a large Docker root can take minutes; give up after 10 s and report it as unknown.
+if command -v timeout >/dev/null 2>&1; then bounded='timeout 10'; else bounded=''; fi
+if [ -n "$docker_root" ]; then usage=$(read_privileged $bounded du -sk "$docker_root" | awk '{printf "%.0f",$1*1024}'); else usage=''; fi
+number "$usage" 'Docker root unavailable, unreadable or too large to measure quickly'; comma
 field runners; runners; comma
 field load_average
 load=$(awk '{printf "[%s,%s,%s]",$1,$2,$3}' /proc/loadavg 2>/dev/null)
