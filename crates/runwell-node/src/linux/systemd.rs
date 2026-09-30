@@ -132,11 +132,12 @@ impl Systemd {
         directory: &Path,
         user: &str,
         secret: &SecretString,
+        home: &Path,
     ) -> Result<(), Error> {
         let executable = directory.join("bin/Runner.Listener");
         let exe = executable.to_str().ok_or(Error::Config)?;
         let env = vec![
-            format!("HOME={}", directory.join("home").display()),
+            format!("HOME={}", home.display()),
             "ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1".into(),
             "PATH=/usr/local/bin:/usr/bin:/bin".into(),
         ];

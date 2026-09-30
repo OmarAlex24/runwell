@@ -2151,13 +2151,17 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "jiff",
+ "jsonwebtoken",
+ "reqwest",
  "runwell-admission",
  "runwell-config",
  "runwell-runner",
  "runwell-scaleset",
  "runwell-store",
+ "runwell-workspace",
  "rustix",
  "secrecy",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -2292,8 +2296,15 @@ dependencies = [
 name = "runwell-workspace"
 version = "0.1.0"
 dependencies = [
+ "proptest",
+ "runwell-config",
  "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

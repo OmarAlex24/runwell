@@ -1,40 +1,44 @@
-//! Ephemeral overlay workspaces and warm cache generations for runwell.
+//! Private writable HOME trees over immutable cache generations.
 //!
-//! Mounted lower generations are immutable and retained until no jobs reference
-//! them. Each job gets its own workdir and HOME; recovery removes only orphan mounts.
-
+//! The node owns one Cache per host, stops all job writers before harvest, and
+//! passes only authenticated workflow metadata to promotion. See README.md.
 #![deny(missing_docs)]
-
-use std::path::PathBuf;
-
-/// Per-job writable paths over an immutable generation.
-#[derive(Debug, Clone)]
-pub struct WorkspaceSpec {
-    /// Durable job identity.
-    pub job_id: u64,
-    /// Immutable lower generation directories.
-    pub lowers: Vec<PathBuf>,
-    /// Parent directory for upper, work, merged, and HOME paths.
-    pub root: PathBuf,
-}
-
-/// Filesystem boundary for preparation, teardown, and unused-generation collection.
-pub trait WorkspaceBackend {
-    /// Prepare independent writable workdir and HOME overlays.
-    fn prepare(&self, spec: &WorkspaceSpec) -> Result<(), Error>;
-    /// Unmount a job only after its processes and containers have stopped.
-    fn teardown(&self, job_id: u64) -> Result<(), Error>;
-    /// Collect generations with no live references.
-    fn gc(&self) -> Result<(), Error>;
-}
-
+mod cache;
+mod copy_delta;
+mod disk;
+mod excludes;
+mod generations;
+mod harvest;
+mod jobs;
+mod model;
+mod mounts;
 #[cfg(target_os = "linux")]
-pub mod overlay;
+mod overlay;
+mod workspace;
+pub use cache::Cache;
+pub use excludes::{DEFAULT_EXCLUDES, Excludes};
+pub use harvest::{LayerEntry, LayerMetadata, apply_upper};
+pub use model::*;
+#[cfg(target_os = "linux")]
+pub use overlay::OverlayWorkspace;
+pub use workspace::{CopyWorkspace, Workspace, WorkspacePaths};
 
-/// An operation that has not been implemented in this milestone.
+/// Filesystem, configuration, or lifecycle failure; never includes job contents.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The public interface is reserved for a later milestone.
-    #[error("this operation is not implemented in the M0 bootstrap")]
-    Unimplemented,
+    /// A host filesystem operation failed.
+    #[error("workspace filesystem operation failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// Invalid cache identity, path, or on-disk journal.
+    #[error("invalid workspace configuration or journal")]
+    Invalid,
+    /// Another manager owns this cache/run directory.
+    #[error("workspace is already managed by another node")]
+    Locked,
+    /// The candidate exceeds its logical byte budget.
+    #[error("workspace generation exceeds the size cap")]
+    SizeCap,
+    /// Detached mounts may still have users. Preserve the generation and upper.
+    #[error("workspace lazily detached; retained until a host reboot")]
+    Detached,
 }

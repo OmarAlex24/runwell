@@ -118,6 +118,9 @@ impl Controller {
             };
             self.store.transition(job.id, terminal).await?;
         }
+        self.backend
+            .harvest_workspace(&self.store.job(job.id).await?)
+            .await?;
         self.backend.cleanup(job.id as u64).await?;
         self.store.cleaned(job.id).await?;
         self.admission.release(job.id as u64);

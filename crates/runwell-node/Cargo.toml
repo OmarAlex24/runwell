@@ -15,6 +15,10 @@ tokio.workspace = true
 secrecy.workspace = true
 tracing.workspace = true
 jiff.workspace = true
+runwell-workspace = { version = "=0.1.0", path = "../runwell-workspace" }
+reqwest.workspace = true
+serde.workspace = true
+jsonwebtoken.workspace = true
 futures-util = "=0.3.34"
 runwell-config = { version = "=0.1.0", path = "../runwell-config" }
 runwell-admission = { version = "=0.1.0", path = "../runwell-admission" }

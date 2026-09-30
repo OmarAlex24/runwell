@@ -70,7 +70,8 @@ pub async fn standalone(config: Config) -> Result<(), Error> {
             return Err(Error::Config);
         }
     }
-    let backend = Arc::new(LinuxBackend::connect(settings).await?);
+    let backend =
+        Arc::new(LinuxBackend::connect_with_github(settings, Some(&config.github)).await?);
     let mut controller = Controller::new(
         &config,
         classes.clone(),

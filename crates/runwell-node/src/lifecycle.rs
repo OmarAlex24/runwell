@@ -68,6 +68,9 @@ impl Controller {
                 self.monitor(&job, runner).await?;
             }
         }
+        // Unknown busy registrations above must preserve their mounts as well
+        // as their services. Reconcile orphans only after DELETE-first recovery.
+        self.backend.reconcile_workspaces(&known).await?;
         Ok(())
     }
     /// Reconsider queued demand, sample exits, and retry retained cleanup work.
@@ -149,6 +152,7 @@ impl Controller {
         self.validate_identity(&runner)?;
         let plan = self.plan(&job, &runner)?;
         self.backend.prepare(&plan).await?;
+        self.backend.prepare_workspace(&job).await?;
         // Preparation may be slow. Re-read host PSI before acquiring, then again
         // before JIT. Reservations already include all admitted jobs.
         if self.pressure(now).await? != Brake::Open {

@@ -10,7 +10,9 @@ use std::{collections::HashSet, path::PathBuf};
 
 mod standalone;
 mod validation;
+mod workspace;
 pub use standalone::{CiLimits, Overcommit, RunnerConfig, StandaloneConfig};
+pub use workspace::{WorkspaceConfig, valid_repository};
 
 /// Complete configuration; call validate before using manually constructed values.
 #[derive(Debug, Clone, Deserialize)]
