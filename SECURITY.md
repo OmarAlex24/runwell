@@ -2,9 +2,9 @@
 
 ## Status and supported versions
 
-runwell is pre-alpha. M0 is a bootstrap with unimplemented execution paths, not a
-supported deployment. There are no supported production release lines yet.
-Security fixes will be developed against the current development branch.
+runwell is pre-alpha. Node execution and Docker attribution are under active
+development, with no supported production release lines yet. Security fixes
+will be developed against the current development branch.
 
 ## Threat model
 
@@ -24,6 +24,25 @@ cgroup parents, labels, and socket bind sources to attribute resources. It
 attributes rather than isolates. Blocking selected privileged options does not
 make the API safe for untrusted workloads. Jobs must not have a direct route to
 the host Docker socket; account and filesystem permissions must enforce this.
+
+The in-process proxy adds job/node labels to explicitly created containers,
+networks and volumes. Teardown only removes objects carrying both matching
+labels, after stopping the proxy; it never prunes shared daemon resources.
+Anonymous/implicit volumes without runwell labels and shared image/build caches
+are intentionally outside this cleanup. The default per-container memory cap
+complements the aggregate slice ceiling; CPU and other user limits are preserved.
+
+`standalone.docker_proxy.deny_host_access` optionally refuses `Privileged=true`
+and host PID/network namespaces. It defaults to false for CI compatibility;
+these settings are logged either way without logging request bodies. Other
+root-equivalent API capabilities remain available, including access to objects
+belonging to other jobs. This is an attribution aid, not an authorization layer.
+
+BuildKit upgrade tunnels are passed through as opaque streams. Buildx solves
+sent over `/grpc`, and shared BuildKit workers that ignore the `/build` cgroup
+option, are not guaranteed to run below the job slice. Do not assume that a
+successful proxied build proves full resource attribution. See the
+[proxy scope and tests](crates/runwell-dockerproxy/README.md#buildkit-scope).
 
 GitHub App and PAT credentials require administrative runner permissions. At
 repository scope, App or fine-grained PAT authentication needs Administration

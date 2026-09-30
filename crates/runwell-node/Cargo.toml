@@ -23,6 +23,7 @@ runwell-runner = { version = "=0.1.0", path = "../runwell-runner" }
 runwell-scaleset = { version = "=0.1.0", path = "../runwell-scaleset" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+runwell-dockerproxy = { version = "=0.1.0", path = "../runwell-dockerproxy" }
 zbus.workspace = true
 zbus_systemd.workspace = true
 rustix.workspace = true

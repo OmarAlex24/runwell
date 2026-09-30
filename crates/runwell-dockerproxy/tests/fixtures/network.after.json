@@ -1,0 +1,1 @@
+{"Name":"network","Driver":"bridge","Labels":{"custom":"kept","io.runwell.job":"42","io.runwell.node":"node-a"},"Internal":true}

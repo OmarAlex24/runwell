@@ -2118,11 +2118,20 @@ name = "runwell-dockerproxy"
 version = "0.1.0"
 dependencies = [
  "bollard",
+ "bytes",
+ "futures-util",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "runwell-config",
+ "rustix",
+ "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2153,6 +2162,7 @@ dependencies = [
  "jiff",
  "runwell-admission",
  "runwell-config",
+ "runwell-dockerproxy",
  "runwell-runner",
  "runwell-scaleset",
  "runwell-store",
@@ -3114,6 +3124,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

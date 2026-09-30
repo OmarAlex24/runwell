@@ -51,6 +51,7 @@ impl Controller {
             self.validate_identity(runner)?;
             let state = self.backend.inspect(job.id as u64).await?;
             if state == ProcessState::Running {
+                self.backend.recover(&self.plan(&job, runner)?).await?;
                 if job.state == State::RunnerCreated {
                     self.store.transition(job.id, State::Running).await?;
                 } else if job.state != State::Running {

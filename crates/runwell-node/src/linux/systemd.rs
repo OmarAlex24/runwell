@@ -132,14 +132,16 @@ impl Systemd {
         directory: &Path,
         user: &str,
         secret: &SecretString,
+        environment: Vec<String>,
     ) -> Result<(), Error> {
         let executable = directory.join("bin/Runner.Listener");
         let exe = executable.to_str().ok_or(Error::Config)?;
-        let env = vec![
+        let mut env = vec![
             format!("HOME={}", directory.join("home").display()),
             "ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1".into(),
             "PATH=/usr/local/bin:/usr/bin:/bin".into(),
         ];
+        env.extend(environment);
         let environment_file = super::credentials::write(id, secret)?;
         self.start_command(
             id,
@@ -193,8 +195,8 @@ impl Systemd {
                 property("UMask", 0o077_u32)?,
                 property("NoNewPrivileges", true)?,
                 property("ProtectControlGroups", true)?,
-                // Docker attribution arrives in M4. Direct privileged sockets are
-                // inaccessible so this milestone cannot escape accounting via Docker.
+                // The runner reaches Docker through its per-job proxy socket.
+                // Keep default direct daemon sockets inaccessible.
                 property(
                     "InaccessiblePaths",
                     Value::new(vec![

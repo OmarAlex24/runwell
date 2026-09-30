@@ -27,7 +27,9 @@ pub(super) fn write(id: u64, secret: &SecretString) -> Result<String, Error> {
     if fs::symlink_metadata(root)?.is_symlink() || fs::metadata(root)?.uid() != 0 {
         return Err(Error::Config);
     }
-    fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+    // Jobs traverse this root to reach their Docker socket. Credential files
+    // remain root-only (0600), and the directory cannot be listed by runners.
+    fs::set_permissions(root, fs::Permissions::from_mode(0o711))?;
     use rustix::fs::{Mode, OFlags, open};
     let fd = open(
         path(id),

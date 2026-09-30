@@ -6,6 +6,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StandaloneConfig {
+    /// Per-job Docker attribution proxy settings.
+    #[serde(default)]
+    pub docker_proxy: super::DockerProxyConfig,
     /// Maximum simultaneous reservations on this host.
     pub max_jobs: u32,
     /// Reservation capacity multipliers.
@@ -61,6 +64,7 @@ pub struct RunnerConfig {
 }
 impl StandaloneConfig {
     pub(super) fn validate(&self, config: &Config) -> Result<(), Error> {
+        self.docker_proxy.validate()?;
         let require = |ok, message: &str| {
             if ok {
                 Ok(())

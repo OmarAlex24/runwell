@@ -23,6 +23,10 @@ pub type NodeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Sen
 /// Sanitized node failures. Foreign errors cannot expose request bodies or env.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Docker proxy setup or label-scoped cleanup failed.
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    DockerProxy(#[from] runwell_dockerproxy::Error),
     /// Node daemon requires root before any host or network mutation.
     #[error("runwell node requires root to manage systemd slices; see SECURITY.md")]
     RootRequired,

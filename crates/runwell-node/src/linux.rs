@@ -1,6 +1,7 @@
 //! Linux systemd/cgroup-v2 backend. Root is checked before any side effect.
 mod bootstrap;
 mod credentials;
+mod proxy;
 mod systemd;
 use crate::*;
 pub use bootstrap::standalone;
@@ -37,6 +38,7 @@ pub struct LinuxBackend {
     user: RunnerUser,
     releases: ReleaseClient,
     templates: Mutex<Templates>,
+    docker_proxy: Option<runwell_dockerproxy::ProxyManager>,
 }
 impl LinuxBackend {
     /// Connect to systemd; require cgroup v2 and the configured local runner user.
@@ -50,6 +52,7 @@ impl LinuxBackend {
         let user = RunnerUser::resolve(&settings.runner_user)?;
         let systemd = Systemd::connect(settings.stop_seconds).await?;
         Ok(Self {
+            docker_proxy: None,
             settings,
             systemd,
             user,
@@ -209,6 +212,7 @@ impl NodeBackend for LinuxBackend {
                 return Err(Error::Config);
             }
             self.systemd.slice(&plan.slice).await?;
+            self.proxy_environment(&plan.slice).await?;
             if self.systemd.inspect(plan.slice.job_id).await? == ProcessState::Running {
                 return Ok(());
             }
@@ -246,15 +250,20 @@ impl NodeBackend for LinuxBackend {
             {
                 return Err(Error::Config);
             }
+            let environment = self.proxy_environment(&plan.slice).await?;
             self.systemd
                 .start(
                     plan.slice.job_id,
                     &plan.directory,
                     &self.user.name,
                     &launch.jit_config,
+                    environment,
                 )
                 .await
         })
+    }
+    fn recover<'a>(&'a self, plan: &'a JobPlan) -> NodeFuture<'a, ()> {
+        Box::pin(async move { self.proxy_environment(&plan.slice).await.map(|_| ()) })
     }
     fn inspect(&self, id: u64) -> NodeFuture<'_, ProcessState> {
         Box::pin(self.systemd.inspect(id))
@@ -267,11 +276,17 @@ impl NodeBackend for LinuxBackend {
         })
     }
     fn stop_runner(&self, id: u64) -> NodeFuture<'_, ()> {
-        Box::pin(async move { self.systemd.stop(&service_unit(id)).await })
+        Box::pin(async move {
+            self.systemd.stop(&service_unit(id)).await?;
+            self.cleanup_proxy(id).await
+        })
     }
     fn inventory(&self) -> NodeFuture<'_, Vec<LocalJob>> {
         Box::pin(async {
             let mut ids: BTreeSet<_> = self.systemd.inventory().await?.into_iter().collect();
+            if let Some(proxy) = &self.docker_proxy {
+                ids.extend(proxy.inventory().await?);
+            }
             for entry in fs::read_dir(&self.settings.runners_dir)? {
                 let entry = entry?;
                 if let Some(id) = entry
@@ -289,6 +304,7 @@ impl NodeBackend for LinuxBackend {
     fn cleanup(&self, id: u64) -> NodeFuture<'_, ()> {
         Box::pin(async move {
             self.systemd.stop(&service_unit(id)).await?;
+            self.cleanup_proxy(id).await?;
             self.systemd.stop(&slice_unit(id)).await?;
             credentials::remove(id)?;
             runwell_runner::remove_install(

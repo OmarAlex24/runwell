@@ -70,7 +70,11 @@ pub async fn standalone(config: Config) -> Result<(), Error> {
             return Err(Error::Config);
         }
     }
-    let backend = Arc::new(LinuxBackend::connect(settings).await?);
+    let backend = Arc::new(
+        LinuxBackend::connect(settings)
+            .await?
+            .with_docker_proxy(config.node.id.clone()),
+    );
     let mut controller = Controller::new(
         &config,
         classes.clone(),

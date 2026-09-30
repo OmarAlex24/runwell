@@ -87,11 +87,15 @@ pub trait NodeBackend: Send + Sync {
     fn prepare<'a>(&'a self, plan: &'a JobPlan) -> NodeFuture<'a, ()>;
     /// Start Runner.Listener directly; duplicate starts must not replace a unit.
     fn start<'a>(&'a self, plan: &'a JobPlan, launch: &'a LaunchSpec) -> NodeFuture<'a, ()>;
+    /// Restore in-process resources for a surviving runner during reconcile.
+    fn recover<'a>(&'a self, _plan: &'a JobPlan) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
     /// Inspect a surviving process without stopping it.
     fn inspect(&self, id: u64) -> NodeFuture<'_, ProcessState>;
     /// Sample final counters while the slice still exists.
     fn measure(&self, id: u64) -> NodeFuture<'_, JobMeasurement>;
-    /// Gracefully stop just the service, keeping the slice for final sampling.
+    /// Stop the service and job-owned Docker resources, keeping the slice for final sampling.
     /// The controller must journal a successful DELETE before calling this.
     fn stop_runner(&self, id: u64) -> NodeFuture<'_, ()>;
     /// List owned services/slices and independent installation directories.

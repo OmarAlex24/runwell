@@ -1,0 +1,1 @@
+{"Name":"volume","DriverOpts":{"type":"tmpfs"},"Labels":{"io.runwell.job":"42","io.runwell.node":"node-a"}}

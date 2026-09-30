@@ -1,0 +1,1 @@
+{"Image":"busybox","Labels":{"custom":"kept","io.runwell.job":"wrong"},"HostConfig":{"CgroupParent":"system.slice","Memory":4096,"CpuShares":512,"Binds":["/var/run/docker.sock:/var/run/docker.sock:ro"]}}

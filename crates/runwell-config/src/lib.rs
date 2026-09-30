@@ -8,8 +8,10 @@
 use serde::Deserialize;
 use std::{collections::HashSet, path::PathBuf};
 
+mod dockerproxy;
 mod standalone;
 mod validation;
+pub use dockerproxy::DockerProxyConfig;
 pub use standalone::{CiLimits, Overcommit, RunnerConfig, StandaloneConfig};
 
 /// Complete configuration; call validate before using manually constructed values.
