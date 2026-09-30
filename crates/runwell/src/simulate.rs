@@ -17,6 +17,12 @@ pub struct Simulate {
     /// runwell-trace JSONL input.
     #[arg(long)]
     trace: PathBuf,
+    /// Optional JSONL or TOML runner/host availability history.
+    #[arg(long)]
+    availability: Option<PathBuf>,
+    /// Sensitivity: resource policies also use observed legacy listener slots.
+    #[arg(long)]
+    runwell_runner_availability: bool,
     /// TOML hosts, resource demands and baseline assumptions.
     #[arg(long)]
     hosts: PathBuf,
@@ -52,6 +58,17 @@ impl Simulate {
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let mut jobs = runwell_trace::read_jsonl(BufReader::new(File::open(self.trace)?))?;
         let mut config: Config = toml::from_str(&std::fs::read_to_string(self.hosts)?)?;
+        if let Some(path) = self.availability {
+            let input = std::fs::read_to_string(&path)?;
+            config
+                .availability
+                .extend(if path.extension().is_some_and(|s| s == "toml") {
+                    runwell_sim::availability::parse_toml(&input)?
+                } else {
+                    runwell_sim::availability::parse_jsonl(&input)?
+                });
+        }
+        config.runwell_runner_availability |= self.runwell_runner_availability;
         if let Some(seed) = self.seed {
             config.seed = seed;
         }

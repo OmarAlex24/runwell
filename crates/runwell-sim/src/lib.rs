@@ -1,6 +1,7 @@
 //! Deterministic discrete-event CI replay using shared scheduler/admission rules.
 #![deny(missing_docs)]
 
+pub mod availability;
 pub mod config;
 pub mod contention;
 mod engine;
@@ -159,3 +160,6 @@ mod search_tests;
 
 #[cfg(test)]
 mod model_tests;
+
+#[cfg(test)]
+mod availability_tests;

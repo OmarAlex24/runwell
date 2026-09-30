@@ -1,6 +1,8 @@
 //! Pure scheduling, placement, dependency priority and semaphore decisions.
 #![deny(missing_docs)]
 
+mod availability;
+pub use availability::{RunnerSlots, RunwellWithRunners, online_nodes};
 mod concurrency;
 mod graph;
 pub use concurrency::{
@@ -184,6 +186,17 @@ impl Runwell {
 
 impl SchedulingPolicy for Runwell {
     fn select(&self, jobs: &[PendingJob], nodes: &[NodeHeadroom], now: f64) -> Option<Placement> {
+        self.select_with_runners(jobs, nodes, now, false)
+    }
+}
+impl Runwell {
+    fn select_with_runners(
+        &self,
+        jobs: &[PendingJob],
+        nodes: &[NodeHeadroom],
+        now: f64,
+        runners: bool,
+    ) -> Option<Placement> {
         let draining = self.draining_host(jobs, nodes, now);
         jobs.iter()
             .filter_map(|job| {
@@ -191,6 +204,7 @@ impl SchedulingPolicy for Runwell {
                     .iter()
                     .filter(|n| {
                         Some(n.node_id) != draining
+                            && (!runners || n.free_runners.get(job.pool).is_some_and(|&n| n > 0))
                             && compatible(job, n)
                             && self.admission.fits(n.capacity, n.reserved, job.reservation)
                     })

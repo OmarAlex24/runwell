@@ -70,6 +70,7 @@ pub struct PreparedTrace {
     pub(crate) repos: Vec<String>,
     pub(crate) pool_limits: Vec<usize>,
     pub(crate) pool_repos: Vec<usize>,
+    pub(crate) availability: Vec<crate::availability::Change>,
     pub(crate) runner_history: Vec<(f64, usize, usize, usize)>,
     /// Fitted contention and heavy failure proxies.
     pub fit: ContentionFit,
@@ -214,6 +215,7 @@ impl PreparedTrace {
             .filter_map(|j| j.run_created_at)
             .min()
             .map_or(0.0, |t| t.as_millisecond() as f64 / 1000.0);
+        let availability = crate::availability::prepare(config, &mapping, origin)?;
         let mut runner_history = Vec::new();
         for change in &config.runner_history {
             let repo = repo_names
@@ -259,7 +261,7 @@ impl PreparedTrace {
             diagnostics.warnings.push("Some job names lack low-concurrency successes; their observed durations are retained, potentially including contention.".into());
         }
         diagnostics.warnings.push("Heavy failure rates are all-cause proxies, not identified infrastructure failures; simulated failures do not trigger retries or change the recorded DAG.".into());
-        diagnostics.warnings.push("Historical runner availability and GitHub dispatch order are not identifiable from execution intervals alone. Older workflow revisions retain inferred dependencies; cancellation groups use branches when PR IDs are absent.".into());
+        diagnostics.warnings.push("Execution intervals alone do not identify listener availability or GitHub dispatch eligibility/order. Optional availability input constrains dispatch but cannot recover upstream eligibility. Older workflow revisions retain inferred dependencies; cancellation groups use branches when PR IDs are absent.".into());
         let repos = repo_names
             .into_iter()
             .enumerate()
@@ -279,6 +281,7 @@ impl PreparedTrace {
             pool_limits,
             pool_repos,
             runner_history,
+            availability,
             fit: model.pooled,
             classes: model.classes,
             diagnostics,

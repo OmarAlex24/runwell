@@ -48,7 +48,8 @@ impl Engine<'_> {
                 })
                 .map(|&i| self.candidate(i))
                 .collect();
-            let Some(p) = self.selector.select(&candidates, &self.nodes, self.now) else {
+            let online = runwell_scheduler::online_nodes(&self.nodes, &self.host_offline);
+            let Some(p) = self.selector.select(&candidates, &online, self.now) else {
                 break;
             };
             let (i, h) = (p.request_id, p.node_id);
@@ -58,9 +59,13 @@ impl Engine<'_> {
             }
             self.timings[i].host = Some(h);
             self.timings[i].held_at = self.now;
-            if self.policy.runner_limited() {
+            if self.use_runners {
                 let pool = self.trace.jobs[i].pool;
-                self.runner_occupied[h][pool] += 1;
+                self.timings[i].runner = Some(
+                    self.runner_slots[h][pool]
+                        .acquire()
+                        .ok_or_else(|| Error::Invalid("selected runner is unavailable".into()))?,
+                );
                 self.refresh_pool(h, pool);
             }
             if self.policy == Policy::Baseline
@@ -88,6 +93,10 @@ impl Engine<'_> {
             let Some(h) = self.timings[i].host else {
                 continue;
             };
+            if self.host_offline[h] > 0 {
+                self.held.push(i);
+                continue;
+            }
             match heavy_slot(
                 self.slots[h],
                 limit,

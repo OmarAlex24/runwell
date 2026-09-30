@@ -94,6 +94,12 @@ impl Report {
                 }
             }
         }
+        let _ = writeln!(
+            out,
+            "\nAvailability: {} records. Resource-policy legacy-listener sensitivity: {}. Host outages pause all policies; runner outages drain active jobs. Classic allocations cycle recorded runner patterns; hosts without evidence stay online.",
+            self.assumptions["availability_records"],
+            self.assumptions["runwell_runner_availability"]
+        );
         let d = &self.diagnostics;
         let _ = writeln!(
             out,

@@ -50,6 +50,60 @@ prove availability at that instant, not the activation time. A capacity
 reduction drains occupied slots; an increase immediately wakes queued jobs.
 Classic counterfactuals ignore history and apply their chosen gate throughout.
 
+## Availability input
+
+`--availability /tmp/availability.jsonl` accepts timestamped capacity changes and
+half-open offline intervals `[start, end)`. A `.toml` file uses `[[events]]` tables
+with the same fields. Alternatively, put `[[availability]]` tables in the hosts
+configuration. All examples below are synthetic:
+
+```jsonl
+{"kind":"pool_size","host":0,"pool":0,"at":"2026-01-01T00:00:00Z","runners":2}
+{"kind":"pool_size","host":0,"pool":0,"at":"2026-01-02T00:00:00Z","runners":4}
+{"kind":"runner_offline","host":0,"pool":0,"runner":1,"start":"2026-01-02T01:00:00Z","end":"2026-01-02T01:05:00Z","cause":"broker"}
+{"kind":"host_offline","host":0,"start":"2026-01-03T01:00:00Z","end":"2026-01-03T01:02:00Z"}
+```
+
+Host and pool indices refer to the configuration's `[[hosts]]` and `[[pools]]`
+order. Pools must be explicitly configured and have local executions. Runner
+ordinals are stable, zero-based identities within each host/pool; they must fit
+its maximum configured/historical capacity. Size changes replace installed
+capacity; zero disables dispatch. Before the first change, configured capacity
+applies, so include an initial snapshot when needed. Do not mix `pool_size` with
+legacy `runner_history` for the same pool. Duplicate size changes at one instant,
+invalid indices and empty/reversed intervals are errors.
+
+`runner_offline` means a listener cannot accept a new job, while its active job
+continues. `cause` is `service` or `broker`, for provenance only. Overlapping
+intervals are unioned by identity; an offline occupied runner does not also remove
+another free slot. A shrinking pool drains active jobs before admitting more.
+`host_offline` prevents dispatch and pauses all work on that host, retaining
+reservations; this is a suspension model, not a crash/restart or failure model.
+Overlapping host intervals also count once. Completions and cancellations precede
+availability changes, then admission, at the same timestamp.
+
+Baseline and `runwell-equivalent` respect runner and host availability. Resource
+policies respect host outages only by default. They do not inherit historical
+per-runner broker sessions, service restarts, or runner installation counts.
+`--runwell-runner-availability` enables an explicit sensitivity combining resource
+admission with those legacy slots and outages; it is not the default controller
+model. A host with no supplied outage history is assumed online.
+
+Classic searches use their chosen fixed counts instead of historical size changes.
+On recorded hosts, additional slots cycle the observed runner ordinal outage
+patterns with period equal to maximum configured/historical capacity. This is an
+explicit counterfactual assumption; unobserved hosts have no inferred outages.
+Reports include availability record count and sensitivity mode, never identifiers
+or raw log records.
+
+Prepare private adapters outside the checkout. A logged retry delay need not have
+elapsed: cancellation can interrupt it immediately. First-failure-to-next-job
+windows may include healthy idle time when successful empty polls are not logged.
+Keep confirmed intervals and such upper-bound sensitivities separate, and do not
+infer whole-host outages from listener network failures alone.
+
+## Resource policies
+
 Runwell has no fixed runner count. CPU/RAM reservations must fit physical capacity
 multiplied by their respective overcommit factors. Both default to 1.0. Placement
 maximizes the smaller post-placement CPU/RAM headroom fraction, with stable host

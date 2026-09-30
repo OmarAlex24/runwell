@@ -69,6 +69,10 @@ pub struct Config {
     pub overcommit_sweep: Vec<f64>,
     /// Optional measured runner availability changes for baseline reconstruction.
     pub runner_history: Vec<RunnerCapacity>,
+    /// Optional runner/host outages and installed pool sizes.
+    pub availability: Vec<crate::availability::Record>,
+    /// Sensitivity only: resource policies additionally require a legacy runner slot.
+    pub runwell_runner_availability: bool,
 }
 
 impl Default for Config {
@@ -108,6 +112,8 @@ impl Default for Config {
             report_workflows: Vec::new(),
             overcommit_sweep: Vec::new(),
             runner_history: Vec::new(),
+            availability: Vec::new(),
+            runwell_runner_availability: false,
         }
     }
 }

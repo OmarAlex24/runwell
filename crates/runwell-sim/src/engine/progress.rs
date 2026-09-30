@@ -30,12 +30,9 @@ impl Engine<'_> {
                 self.nodes[h].reserved.cpu_slots -= r.cpu_slots;
                 self.nodes[h].reserved.memory_bytes -= r.memory_bytes;
             }
-            if self.policy.runner_limited() {
-                self.runner_occupied[h][j.pool] -= 1;
-                self.nodes[h].free_runners[j.pool] = runwell_scheduler::runner_headroom(
-                    self.runner_limits[h][j.pool],
-                    self.runner_occupied[h][j.pool],
-                );
+            if let Some(runner) = t.runner {
+                self.runner_slots[h][j.pool].release(runner);
+                self.nodes[h].free_runners[j.pool] = self.runner_slots[h][j.pool].free();
             }
             if t.slot {
                 self.slots[h] -= 1;
@@ -63,6 +60,9 @@ impl Engine<'_> {
                 let Some(h) = self.timings[i].host else {
                     return 1.0;
                 };
+                if self.host_offline[h] > 0 {
+                    return 0.0;
+                }
                 if self.config.observed_work {
                     return 1.0;
                 }
@@ -83,7 +83,11 @@ impl Engine<'_> {
             .collect()
     }
     pub(super) fn advance(&mut self, dt: f64, speeds: &[f64]) {
-        for n in &self.nodes {
+        for n in self
+            .nodes
+            .iter()
+            .filter(|n| self.host_offline[n.node_id] == 0)
+        {
             self.cpu_area += f64::from(n.reserved.cpu_slots.min(n.capacity.cpu_slots)) * dt;
             self.memory_area += n.reserved.memory_bytes.min(n.capacity.memory_bytes) as f64 * dt;
         }
@@ -92,6 +96,9 @@ impl Engine<'_> {
             let job = &self.trace.jobs[i];
             t.remaining -= dt * speed;
             if let Some(h) = t.host {
+                if self.host_offline[h] > 0 {
+                    continue;
+                }
                 self.service[job.repo] += dt * f64::from(job.demand.cores);
                 if job.demand.heavy {
                     let n = &self.nodes[h];

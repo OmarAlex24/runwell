@@ -38,6 +38,7 @@ pub(crate) struct Timing {
     pub end: f64,
     pub failure: bool,
     pub host: Option<usize>,
+    runner: Option<usize>,
     done: bool,
     cancelled: bool,
     held_at: f64,
@@ -60,8 +61,10 @@ struct Engine<'a> {
     selector: Box<dyn SchedulingPolicy>,
     now: f64,
     nodes: Vec<NodeHeadroom>,
-    runner_limits: Vec<Vec<usize>>,
-    runner_occupied: Vec<Vec<usize>>,
+    runner_slots: Vec<Vec<runwell_scheduler::RunnerSlots>>,
+    use_runners: bool,
+    host_offline: Vec<usize>,
+    capacity_changes: Vec<crate::availability::Change>,
     capacity_agenda: BinaryHeap<Event>,
     agenda: BinaryHeap<Event>,
     cancel_agenda: BinaryHeap<Event>,
@@ -106,11 +109,18 @@ pub(crate) fn replay_allocation(
     }
     let selector: Box<dyn SchedulingPolicy> = match policy.priority() {
         None => Box::new(Baseline),
-        Some(priority) => Box::new(Runwell {
-            priority,
-            aging_seconds: config.aging_seconds,
-            admission: config.admission()?,
-        }),
+        Some(priority) => {
+            let policy = Runwell {
+                priority,
+                aging_seconds: config.aging_seconds,
+                admission: config.admission()?,
+            };
+            if config.runwell_runner_availability {
+                Box::new(runwell_scheduler::RunwellWithRunners(policy))
+            } else {
+                Box::new(policy)
+            }
+        }
     };
     let nodes: Vec<_> = config.hosts[..hosts]
         .iter()
@@ -123,28 +133,34 @@ pub(crate) fn replay_allocation(
             free_runners: allocation.map_or_else(|| trace.pool_limits.clone(), |a| a[i].clone()),
         })
         .collect();
+    let use_runners = policy.runner_limited() || config.runwell_runner_availability;
+    let changes = capacity::timeline(trace, use_runners, allocation, hosts);
     let mut engine = Engine {
         trace,
         config,
         policy,
         selector,
         now: 0.0,
-        runner_limits: nodes.iter().map(|n| n.free_runners.clone()).collect(),
-        runner_occupied: vec![vec![0; trace.pool_limits.len()]; hosts],
-        capacity_agenda: if policy.runner_limited() && allocation.is_none() {
-            trace
-                .runner_history
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, h, _, _))| *h < hosts)
-                .map(|(i, (time, _, _, _))| Event {
-                    time: *time,
-                    job: i,
-                })
-                .collect()
-        } else {
-            BinaryHeap::new()
-        },
+        runner_slots: nodes
+            .iter()
+            .map(|n| {
+                n.free_runners
+                    .iter()
+                    .map(|&limit| runwell_scheduler::RunnerSlots::new(limit))
+                    .collect()
+            })
+            .collect(),
+        use_runners,
+        host_offline: vec![0; hosts],
+        capacity_agenda: changes
+            .iter()
+            .enumerate()
+            .map(|(i, c)| Event {
+                time: c.time,
+                job: i,
+            })
+            .collect(),
+        capacity_changes: changes,
         nodes,
         agenda: BinaryHeap::new(),
         cancel_agenda: trace
@@ -247,6 +263,12 @@ pub(crate) fn replay_allocation(
             next = next.min(engine.now + engine.timings[i].remaining.max(0.0) / rate);
         }
         for &i in &engine.held {
+            if engine.timings[i]
+                .host
+                .is_some_and(|h| engine.host_offline[h] > 0)
+            {
+                continue;
+            }
             next = next.min(engine.timings[i].held_at + config.semaphore_timeout_seconds);
         }
         if !next.is_finite() {
