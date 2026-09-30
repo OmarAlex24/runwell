@@ -155,7 +155,8 @@ runners() {
 daily_cpu() {
     if ! command -v sar >/dev/null 2>&1; then unknown 'sar is not installed'; return; fi
     daily_sep=''; daily_data=''
-    for offset in 1 2 3 4 5 6 7; do
+    # Today (partial) plus the six previous days, so a fresh sysstat install reports data.
+    for offset in 0 1 2 3 4 5 6; do
         day=$(date -d "$offset days ago" +%Y-%m-%d 2>/dev/null)
         [ -n "$day" ] || continue
         compact=$(printf '%s' "$day" | tr -d '-')
@@ -176,7 +177,7 @@ daily_cpu() {
         daily_data="$daily_data$daily_sep{\"date\":{\"value\":\"$day\",\"unknown_reason\":null},\"p50\":{\"value\":$1,\"unknown_reason\":null},\"p95\":{\"value\":$2,\"unknown_reason\":null},\"samples\":{\"value\":$3,\"unknown_reason\":null}}"
         daily_sep=','
     done
-    if [ -n "$daily_data" ]; then raw "[$daily_data]"; else unknown 'no readable CPU samples in the previous seven days'; fi
+    if [ -n "$daily_data" ]; then raw "[$daily_data]"; else unknown 'no readable CPU samples in the last seven days'; fi
 }
 listeners() {
     if ! command -v ss >/dev/null 2>&1; then unknown 'ss unavailable; listening processes unknown'; return; fi
