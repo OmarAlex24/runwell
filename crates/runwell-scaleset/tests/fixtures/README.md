@@ -7,3 +7,6 @@ array, valid message ID zero, and both Go zero-time encodings.
 
 The App PEM key pair was generated solely for local JWT signature tests. It has
 no service installation or production use.
+
+`app-test-key.pem` / `app-test-public.pem` are a throwaway RSA key pair generated only to sign and verify
+GitHub App JWTs in `tests/auth.rs`. They are not credentials for anything.

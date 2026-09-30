@@ -14,3 +14,6 @@
 .credentials*
 /runwell.local.toml
 /.runwell/
+
+# Test-only fixtures (throwaway keys generated for unit tests, never used anywhere else)
+!crates/*/tests/fixtures/*.pem
