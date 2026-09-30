@@ -11,3 +11,5 @@ workspace = true
 
 [dependencies]
 clap.workspace = true
+tokio.workspace = true
+runwell-report = { version = "=0.1.0", path = "../runwell-report" }

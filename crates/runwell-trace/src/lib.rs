@@ -48,6 +48,18 @@ pub struct TraceJob {
     pub needs: Option<Vec<String>>,
     #[serde(default)]
     pub steps: Vec<TraceStep>,
+    /// Check-run annotation messages used for failure classification.
+    #[serde(default)]
+    pub annotations: Vec<String>,
+    /// Optional failed-job log evidence, fetched only on request.
+    #[serde(default)]
+    pub log_excerpt: Option<String>,
+    /// Workflow timeout, if it is a literal number in the source YAML.
+    #[serde(default)]
+    pub timeout_minutes: Option<f64>,
+    /// Stable YAML job key when mapping to the observed job is unambiguous.
+    #[serde(default)]
+    pub workflow_job_id: Option<String>,
 }
 
 /// One step of a job.

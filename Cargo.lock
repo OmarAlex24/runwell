@@ -973,6 +973,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "humantime"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,6 +1848,8 @@ name = "runwell"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "runwell-report",
+ "tokio",
 ]
 
 [[package]]
@@ -1912,8 +1920,21 @@ dependencies = [
 name = "runwell-report"
 version = "0.1.0"
 dependencies = [
- "runwell-github",
+ "base64 0.22.1",
+ "clap",
+ "humantime",
+ "jiff",
+ "regex",
+ "reqwest",
+ "runwell-trace",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
  "thiserror",
+ "tokio",
+ "toml",
+ "wiremock",
 ]
 
 [[package]]
@@ -2237,6 +2258,19 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -2919,6 +2953,12 @@ name = "unicode-properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

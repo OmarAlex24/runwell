@@ -11,4 +11,19 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
-runwell-github = { version = "=0.1.0", path = "../runwell-github" }
+runwell-trace = { version = "=0.1.0", path = "../runwell-trace" }
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+clap.workspace = true
+toml.workspace = true
+regex = "=1.13.1"
+serde_yaml = "=0.9.34"
+base64 = "=0.22.1"
+humantime = "=2.4.0"
+
+[dev-dependencies]
+wiremock = "=0.6.5"
+tempfile = "=3.27.0"

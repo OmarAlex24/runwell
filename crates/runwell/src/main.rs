@@ -1,7 +1,7 @@
 //! Single-binary entry point for runwell controller, node, and analysis commands.
 //!
-//! M0 exposes the CLI contract only: unfinished commands report their status and
-//! exit with code 2 without starting a runner, opening sockets, or modifying state.
+//! The report command analyzes CI history; remaining commands expose their CLI
+//! contract and exit with code 2 until their respective milestones are implemented.
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -23,7 +23,7 @@ enum Command {
     /// Run a Linux host execution node.
     Node,
     /// Explain CI latency using GitHub workflow history.
-    Report,
+    Report(Box<runwell_report::ReportArgs>),
     /// Replay a recorded job trace against scheduling policies.
     Simulate,
     /// Suggest workflow improvements and agent-facing rules.
@@ -32,11 +32,12 @@ enum Command {
     Version,
 }
 
-fn main() -> ExitCode {
-    dispatch(Cli::parse().command)
+#[tokio::main]
+async fn main() -> ExitCode {
+    dispatch(Cli::parse().command).await
 }
 
-fn dispatch(command: Command) -> ExitCode {
+async fn dispatch(command: Command) -> ExitCode {
     let name = match command {
         Command::Version => {
             println!("runwell {}", env!("CARGO_PKG_VERSION"));
@@ -44,7 +45,18 @@ fn dispatch(command: Command) -> ExitCode {
         }
         Command::Controller => "controller",
         Command::Node => "node",
-        Command::Report => "report",
+        Command::Report(args) => {
+            return match runwell_report::execute(&args).await {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("runwell report: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Command::Simulate => "simulate",
         Command::Advise => "advise",
     };

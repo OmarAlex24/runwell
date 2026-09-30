@@ -1,0 +1,42 @@
+# Ordered evidence rules. Custom files replace these rules; aggregator_patterns is optional.
+aggregator_patterns = []
+
+[[rules]]
+name = "runner shutdown or disconnect"
+class = "infra"
+pattern = '(?i)(runner has received a shutdown signal|lost communication with the server)'
+
+[[rules]]
+name = "workflow timeout"
+class = "infra"
+pattern = '(?i)(exceeded the maximum execution time|job.*timed out)'
+
+[[rules]]
+name = "disk exhaustion"
+class = "infra"
+pattern = '(?i)(no space left on device|disk quota exceeded)'
+
+[[rules]]
+name = "memory exhaustion"
+class = "infra"
+pattern = '(?i)(out of memory|oom.?kill|\bKilled\b|exit code 137)'
+
+[[rules]]
+name = "registry or network failure"
+class = "infra"
+pattern = '(?i)(failed to pull image|toomanyrequests|TLS handshake timeout|connection reset by peer|temporary failure in name resolution|network is unreachable|registry.*(unavailable|timeout))'
+
+[[rules]]
+name = "shared cache or lock contention"
+class = "infra"
+pattern = '(?i)(parallel golangci-lint is running|cache.*lock.*(failed|timeout|contention)|/usr/bin/tar.*failed with exit code 2)'
+
+[[rules]]
+name = "setup or container initialization"
+class = "infra"
+pattern = '(?i)^failed step: (Set up job|Initialize containers|Checkout|Run actions/checkout|Install dependencies|Install Chromium|Install golangci-lint|Setup .*install|Stop containers)'
+
+[[rules]]
+name = "superseded by newer run"
+class = "superseded"
+pattern = '(?i)(higher priority waiting request|canceling since a higher priority)'
