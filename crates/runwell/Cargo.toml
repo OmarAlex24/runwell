@@ -13,3 +13,7 @@ workspace = true
 clap.workspace = true
 tokio.workspace = true
 runwell-report = { version = "=0.1.0", path = "../runwell-report" }
+runwell-setup = { version = "=0.1.0", path = "../runwell-setup" }
+
+[dev-dependencies]
+serde_json.workspace = true

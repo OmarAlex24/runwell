@@ -1,0 +1,1 @@
+{"os":{"value":"Example Linux"},"docker_present":{"value":false},"docker_version":{"value":null,"unknown_reason":"Docker CLI unavailable"},"cgroup_v2":{"value":false},"psi":{"value":false},"runners":{"value":[]}}

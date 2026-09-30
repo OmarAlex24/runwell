@@ -1,7 +1,7 @@
 //! Single-binary entry point for runwell controller, node, and analysis commands.
 //!
-//! The report command analyzes CI history; remaining commands expose their CLI
-//! contract and exit with code 2 until their respective milestones are implemented.
+//! Report analyzes CI history and setup provides read-only host discovery;
+//! other unfinished commands report their status and exit with code 2.
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -28,6 +28,8 @@ enum Command {
     Simulate,
     /// Suggest workflow improvements and agent-facing rules.
     Advise,
+    /// Discover Linux hosts and start a resumable CI setup wizard.
+    Setup(runwell_setup::SetupArgs),
     /// Print the runwell version.
     Version,
 }
@@ -39,6 +41,15 @@ async fn main() -> ExitCode {
 
 async fn dispatch(command: Command) -> ExitCode {
     let name = match command {
+        Command::Setup(args) => {
+            return match runwell_setup::run(args).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runwell setup: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Command::Version => {
             println!("runwell {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

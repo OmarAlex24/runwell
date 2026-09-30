@@ -14,6 +14,7 @@ fn help_lists_all_subcommands() {
         "report",
         "simulate",
         "advise",
+        "setup",
         "version",
     ] {
         assert!(help.contains(command));
