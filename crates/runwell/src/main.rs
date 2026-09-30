@@ -1,7 +1,10 @@
 //! Single-binary entry point for runwell controller, node, and analysis commands.
 //!
-//! Report analyzes CI history and setup provides read-only host discovery;
-//! other unfinished commands report their status and exit with code 2.
+//! Report analyzes CI history, simulate replays local traces, and setup provides
+//! read-only host discovery; unfinished commands report their status and exit
+//! with code 2 without starting a runner, opening sockets, or modifying state.
+
+mod simulate;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -25,7 +28,7 @@ enum Command {
     /// Explain CI latency using GitHub workflow history.
     Report(Box<runwell_report::ReportArgs>),
     /// Replay a recorded job trace against scheduling policies.
-    Simulate,
+    Simulate(simulate::Simulate),
     /// Suggest workflow improvements and agent-facing rules.
     Advise,
     /// Discover Linux hosts and start a resumable CI setup wizard.
@@ -68,7 +71,15 @@ async fn dispatch(command: Command) -> ExitCode {
                 }
             };
         }
-        Command::Simulate => "simulate",
+        Command::Simulate(args) => {
+            return match args.run() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runwell simulate: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Command::Advise => "advise",
     };
     eprintln!("runwell {name}: not implemented in the M0 bootstrap (pre-alpha)");

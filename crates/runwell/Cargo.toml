@@ -14,6 +14,7 @@ clap.workspace = true
 tokio.workspace = true
 runwell-report = { version = "=0.1.0", path = "../runwell-report" }
 runwell-setup = { version = "=0.1.0", path = "../runwell-setup" }
-
-[dev-dependencies]
+runwell-sim = { version = "=0.1.0", path = "../runwell-sim" }
+runwell-trace = { version = "=0.1.0", path = "../runwell-trace" }
 serde_json.workspace = true
+toml.workspace = true

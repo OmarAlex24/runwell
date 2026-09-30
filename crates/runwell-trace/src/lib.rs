@@ -46,6 +46,19 @@ pub struct TraceJob {
     /// `None` means unknown (consumers may infer from timestamps).
     #[serde(default)]
     pub needs: Option<Vec<String>>,
+    /// Stable YAML job key, shared by all children of a matrix. `None` when the
+    /// mapping from the observed job to the workflow is ambiguous.
+    #[serde(default)]
+    pub workflow_job_id: Option<String>,
+    /// Workflow matrix concurrency limit.
+    #[serde(default)]
+    pub max_parallel: Option<usize>,
+    /// Dispatch-only delay after dependencies, supplied by a workflow importer.
+    #[serde(default)]
+    pub dispatch_delay_seconds: Option<f64>,
+    /// Resolved workflow concurrency group; newer runs cancel unfinished work.
+    #[serde(default)]
+    pub cancel_group: Option<String>,
     #[serde(default)]
     pub steps: Vec<TraceStep>,
     /// Check-run annotation messages used for failure classification.
@@ -57,9 +70,6 @@ pub struct TraceJob {
     /// Workflow timeout, if it is a literal number in the source YAML.
     #[serde(default)]
     pub timeout_minutes: Option<f64>,
-    /// Stable YAML job key when mapping to the observed job is unambiguous.
-    #[serde(default)]
-    pub workflow_job_id: Option<String>,
 }
 
 /// One step of a job.

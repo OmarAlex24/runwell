@@ -1,44 +1,161 @@
-//! Deterministic job-trace replay against scheduling policies for runwell.
-//!
-//! Simulation uses recorded arrivals and durations, with no wall-clock or network
-//! access. All policies must see the same trace and capacity assumptions.
-
+//! Deterministic discrete-event CI replay using shared scheduler/admission rules.
 #![deny(missing_docs)]
 
-use runwell_scheduler::SchedulingPolicy;
+pub mod config;
+pub mod contention;
+mod engine;
+mod model;
+mod observation;
+pub use model::ClassModel;
+pub mod experiments;
+mod prepare_graph;
+mod report;
+pub mod search;
+mod trace;
+pub mod workflow;
 
-/// One observed job in a replay trace.
-#[derive(Debug, Clone, Copy)]
-pub struct TraceJob {
-    /// Original request identity.
-    pub request_id: i64,
-    /// Arrival relative to trace start in milliseconds.
-    pub arrival_ms: u64,
-    /// Observed run duration in milliseconds.
-    pub duration_ms: u64,
+pub use config::Config;
+pub use report::{Calibration, Metrics, ObservedMetrics, Report, Row};
+use runwell_scheduler::Priority;
+use serde::{Deserialize, Serialize};
+pub use trace::{Diagnostics, PreparedTrace};
+
+/// Named scheduling variants exposed by the CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Policy {
+    /// Fixed per-repository runner pools with optional heavy semaphore.
+    Baseline,
+    /// Same per-pool capacity and FIFO as baseline, without semaphore occupancy.
+    #[serde(rename = "runwell-equivalent")]
+    Equivalent,
+    /// Resource admission and FIFO.
+    Fifo,
+    /// Resource admission and shortest expected job first.
+    Shortest,
+    /// Resource admission and longest remaining path first.
+    CriticalPath,
+    /// Resource admission and repository CPU service fairness.
+    FairShare,
+}
+impl Policy {
+    /// Complete comparison set, in stable output order.
+    pub const ALL: [Self; 6] = [
+        Self::Baseline,
+        Self::Equivalent,
+        Self::Fifo,
+        Self::Shortest,
+        Self::CriticalPath,
+        Self::FairShare,
+    ];
+    /// CLI/report name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Equivalent => "runwell-equivalent",
+            Self::Fifo => "fifo",
+            Self::Shortest => "shortest",
+            Self::CriticalPath => "critical-path",
+            Self::FairShare => "fair-share",
+        }
+    }
+    /// Parse a CLI policy name. `runwell` aliases critical-path.
+    pub fn parse(value: &str) -> Result<Self, Error> {
+        if value == "runwell" {
+            return Ok(Self::CriticalPath);
+        }
+        Self::ALL
+            .into_iter()
+            .find(|p| p.name() == value)
+            .ok_or_else(|| Error::Invalid(format!("unknown policy: {value}")))
+    }
+    pub(crate) fn runner_limited(self) -> bool {
+        matches!(self, Self::Baseline | Self::Equivalent)
+    }
+    pub(crate) fn priority(self) -> Option<Priority> {
+        match self {
+            Self::Baseline | Self::Equivalent => None,
+            Self::Fifo => Some(Priority::Fifo),
+            Self::Shortest => Some(Priority::Shortest),
+            Self::CriticalPath => Some(Priority::CriticalPath),
+            Self::FairShare => Some(Priority::FairShare),
+        }
+    }
 }
 
-/// Comparable replay outcome.
-#[derive(Debug, Clone, Copy)]
-pub struct SimulationResult {
-    /// Total trace makespan in milliseconds.
-    pub makespan_ms: u64,
-    /// Aggregate queue wait in milliseconds.
-    pub queue_wait_ms: u64,
+/// Run requested policies for each prefix of the host list (one host, then two,
+/// and so on). Preparation and fitting are performed only once.
+pub fn simulate(
+    trace: &[runwell_trace::TraceJob],
+    config: &Config,
+    policies: &[Policy],
+) -> Result<Report, Error> {
+    let prepared = PreparedTrace::new(trace, config)?;
+    compare(&prepared, policies)
 }
 
-/// Replay a recorded trace using a pure policy; currently unimplemented.
-pub fn replay(
-    _trace: &[TraceJob],
-    _policy: &impl SchedulingPolicy,
-) -> Result<SimulationResult, Error> {
-    Err(Error::Unimplemented)
+/// Compare scenarios against an already prepared trace using the same configuration.
+pub fn compare(trace: &PreparedTrace, policies: &[Policy]) -> Result<Report, Error> {
+    let config = &trace.config;
+    config.validate()?;
+    if policies.is_empty() {
+        return Err(Error::Invalid("at least one policy is required".into()));
+    }
+    let mut report = Report::new(trace, config);
+    for hosts in 1..=config.hosts.len() {
+        for &policy in policies {
+            let factors = if policy.runner_limited() || config.overcommit_sweep.is_empty() {
+                vec![config.cpu_overcommit]
+            } else {
+                config.overcommit_sweep.clone()
+            };
+            for factor in factors {
+                let mut scenario = config.clone();
+                scenario.cpu_overcommit = factor;
+                if !config.overcommit_sweep.is_empty() {
+                    scenario.memory_overcommit = factor;
+                }
+                let outcome = engine::replay(trace, &scenario, policy, hosts)?;
+                report.add(
+                    trace,
+                    policy,
+                    hosts,
+                    &outcome,
+                    (!policy.runner_limited()).then_some(factor),
+                );
+            }
+        }
+        if policies.contains(&Policy::Equivalent) {
+            report
+                .equivalence
+                .push(experiments::verify_equivalent(trace, hosts)?);
+        }
+    }
+    Ok(report)
 }
 
-/// An operation that has not been implemented in this milestone.
+/// Invalid configuration, trace or dependency graph.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The public interface is reserved for a later milestone.
-    #[error("this operation is not implemented in the M0 bootstrap")]
-    Unimplemented,
+    /// Invalid input with a privacy-preserving explanation.
+    #[error("{0}")]
+    Invalid(String),
+    /// Invalid resource multipliers.
+    #[error(transparent)]
+    Admission(#[from] runwell_admission::Error),
+    /// Invalid dependencies.
+    #[error(transparent)]
+    Graph(#[from] runwell_scheduler::GraphError),
 }
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod workflow_tests;
+
+#[cfg(test)]
+mod search_tests;
+
+#[cfg(test)]
+mod model_tests;

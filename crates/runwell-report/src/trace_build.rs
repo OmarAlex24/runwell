@@ -80,6 +80,9 @@ pub fn job(repo: &str, run: &Run, value: Value) -> Result<TraceJob, Error> {
         log_excerpt: None,
         timeout_minutes: None,
         workflow_job_id: None,
+        max_parallel: None,
+        dispatch_delay_seconds: None,
+        cancel_group: None,
     })
 }
 

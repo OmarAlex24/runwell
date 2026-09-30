@@ -1,0 +1,42 @@
+# Synthetic example. Scenarios use one host, then both hosts.
+seed = 1
+cpu_overcommit = 1.0
+memory_overcommit = 1.0
+aging_seconds = 300.0
+fit_by_class = true
+derive_cpu_demand = true
+heavy_slots = 3
+semaphore_timeout_seconds = 900.0
+semaphore_steps = ["Acquire heavy slot"]
+# Set contention_label to your local runner label when the trace spans hosts.
+# Jobs outside that label retain external queue/work, without using local capacity.
+
+[[hosts]]
+class = "big"
+cores = 12
+memory_gib = 31.0
+
+[[hosts]]
+class = "small"
+cores = 8
+memory_gib = 15.0
+
+[default_demand]
+cores = 1
+memory_gib = 1.0
+
+[[jobs]]
+name = "coverage"
+[jobs.demand]
+cores = 1 # Replaced by the sensitivity proxy when enabled.
+memory_gib = 1.0 # Explicit prior; replace with measured RAM when available.
+heavy = true
+# host_class = "big" # Optional pin, respected by both policies.
+
+[[pools]]
+repo = "example/app"
+runners = 6
+
+[[pools]]
+repo = "example/service"
+runners = 4
