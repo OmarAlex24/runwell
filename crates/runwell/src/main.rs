@@ -30,7 +30,7 @@ enum Command {
     /// Replay a recorded job trace against scheduling policies.
     Simulate(simulate::Simulate),
     /// Suggest workflow improvements and agent-facing rules.
-    Advise,
+    Advise(runwell_advise::cli::AdviseArgs),
     /// Discover Linux hosts and start a resumable CI setup wizard.
     Setup(runwell_setup::SetupArgs),
     /// Print the runwell version.
@@ -80,7 +80,18 @@ async fn dispatch(command: Command) -> ExitCode {
                 }
             };
         }
-        Command::Advise => "advise",
+        Command::Advise(args) => {
+            return match runwell_advise::cli::execute(&args) {
+                Ok((text, code)) => {
+                    println!("{text}");
+                    ExitCode::from(code)
+                }
+                Err(error) => {
+                    eprintln!("runwell advise: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
     };
     eprintln!("runwell {name}: not implemented in the M0 bootstrap (pre-alpha)");
     ExitCode::from(2)

@@ -1,28 +1,37 @@
-//! Workflow advice and agent-facing rules for runwell.
-//!
-//! Advice identifies shardable steps, serial hops, and missing concurrency without
-//! executing workflow code or changing workflow semantics.
-
+//! Static GitHub Actions advice with trace evidence and byte-preserving local fixes.
 #![deny(missing_docs)]
-
-/// One actionable workflow finding.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Finding {
-    /// Stable rule identifier.
-    pub rule: String,
-    /// Explanation and suggested improvement in English.
-    pub message: String,
+pub mod cli;
+mod context;
+mod local;
+mod model;
+mod render;
+mod rules;
+mod spans;
+mod timing;
+mod writer;
+mod yaml;
+pub use model::{Change, Finding, Fix, Report, Savings, Severity};
+pub use writer::atomic_write;
+/// Analyze workflow text statically with automatic runner-label classification.
+pub fn analyze(workflow: &str) -> Result<Vec<Finding>, Error> {
+    cli::analyze_source(workflow, "workflow.yml", cli::SelfHosted::Auto, None)
 }
-
-/// Analyze workflow text without running it; currently unimplemented.
-pub fn analyze(_workflow: &str) -> Result<Vec<Finding>, Error> {
-    Err(Error::Unimplemented)
-}
-
-/// An operation that has not been implemented in this milestone.
+/// Analysis, trace, or safe-edit failure (CLI exit code 2).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The public interface is reserved for a later milestone.
-    #[error("this operation is not implemented in the M0 bootstrap")]
-    Unimplemented,
+    /// Filesystem error.
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    /// Invalid YAML or workflow shape.
+    #[error("{0}")]
+    Parse(String),
+    /// Invalid trace.
+    #[error("{0}")]
+    Trace(#[from] runwell_trace::TraceError),
+    /// JSON encoding error.
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+    /// Edit safety failure.
+    #[error("{0}")]
+    Fix(String),
 }

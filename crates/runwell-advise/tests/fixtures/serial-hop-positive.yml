@@ -1,0 +1,12 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    needs: upstream
+    runs-on: self-hosted
+    steps:
+      - run: echo ok
+  upstream:
+    runs-on: self-hosted
+    steps:
+      - run: echo ok

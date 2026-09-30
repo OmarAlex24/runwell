@@ -23,7 +23,7 @@ fn help_lists_all_subcommands() {
 
 #[test]
 fn unfinished_commands_exit_two_and_explain_status() {
-    for command in ["controller", "node", "advise"] {
+    for command in ["controller", "node"] {
         let output = Command::new(env!("CARGO_BIN_EXE_runwell"))
             .arg(command)
             .output()
@@ -130,4 +130,34 @@ fn simulate_emits_parseable_json_and_markdown() {
         }
     }
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn advise_help_and_usage_errors() {
+    let output = Command::new(env!("CARGO_BIN_EXE_runwell"))
+        .args(["advise", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    for flag in [
+        "--workflows",
+        "--trace",
+        "--format",
+        "--fix",
+        "--rule",
+        "--self-hosted",
+    ] {
+        assert!(help.contains(flag));
+    }
+    for args in [
+        vec!["advise", "--rule", "missing-concurrency"],
+        vec!["advise", "--fix", "--rule", "unknown"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_runwell"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
 }

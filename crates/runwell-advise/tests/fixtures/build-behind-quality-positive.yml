@@ -1,0 +1,12 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    needs: quality
+    runs-on: self-hosted
+    steps:
+      - uses: docker/build-push-action@v6
+  quality:
+    runs-on: self-hosted
+    steps:
+      - run: pytest

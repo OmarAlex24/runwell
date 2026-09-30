@@ -1,0 +1,10 @@
+# preserve café
+name: checks
+on:
+   pull_request:
+# preserve job order
+jobs:
+   check:
+      runs-on: self-hosted
+      steps:
+         - run: echo ok # keep

@@ -1,0 +1,13 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    needs: quality
+    environment: production
+    runs-on: self-hosted
+    steps:
+      - run: docker build .
+  quality:
+    runs-on: self-hosted
+    steps:
+      - run: pytest

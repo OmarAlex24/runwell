@@ -1,0 +1,9 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Run tests
+        run: pytest

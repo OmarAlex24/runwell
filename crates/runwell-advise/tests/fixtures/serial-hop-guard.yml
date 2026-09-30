@@ -1,0 +1,9 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    needs: upstream
+    environment: production
+    runs-on: self-hosted
+    steps:
+      - run: echo ok

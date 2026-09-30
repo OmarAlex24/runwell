@@ -1,0 +1,11 @@
+name: checks
+on: pull_request
+jobs:
+   check:
+      runs-on: self-hosted
+      env:
+         # untouched cache choice
+         GOLANGCI_LINT_CACHE: ${{ github.workspace }}/../.runwell-cache/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ strategy.job-index || 0 }}/golangci-lint
+         KEEP: 'quoted'
+      steps:
+         - run: golangci-lint run # preserve

@@ -16,5 +16,6 @@ runwell-report = { version = "=0.1.0", path = "../runwell-report" }
 runwell-setup = { version = "=0.1.0", path = "../runwell-setup" }
 runwell-sim = { version = "=0.1.0", path = "../runwell-sim" }
 runwell-trace = { version = "=0.1.0", path = "../runwell-trace" }
+runwell-advise = { version = "=0.1.0", path = "../runwell-advise" }
 serde_json.workspace = true
 toml.workspace = true

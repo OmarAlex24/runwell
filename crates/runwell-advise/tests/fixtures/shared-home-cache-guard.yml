@@ -1,0 +1,9 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    runs-on: self-hosted
+    env:
+      GOLANGCI_LINT_CACHE: ${{ runner.temp }}/lint
+    steps:
+      - run: golangci-lint run

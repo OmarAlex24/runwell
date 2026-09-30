@@ -1,0 +1,11 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    runs-on: self-hosted
+    services:
+      db:
+        image: postgres:16
+        ports: ["5432:5432"]
+    steps:
+      - run: echo ok

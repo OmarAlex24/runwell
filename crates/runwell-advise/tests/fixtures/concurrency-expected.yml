@@ -1,0 +1,13 @@
+# preserve café
+concurrency:
+   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+name: checks
+on:
+   pull_request:
+# preserve job order
+jobs:
+   check:
+      runs-on: self-hosted
+      steps:
+         - run: echo ok # keep

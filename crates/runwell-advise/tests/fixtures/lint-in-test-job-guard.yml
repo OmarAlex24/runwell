@@ -1,0 +1,8 @@
+name: checks
+on: pull_request
+jobs:
+  check:
+    runs-on: self-hosted
+    steps:
+      - run: echo "pytest"
+      - run: ruff check .
