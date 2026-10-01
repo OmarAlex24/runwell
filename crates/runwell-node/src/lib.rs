@@ -12,6 +12,8 @@ mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod linux;
 mod runtime;
+#[cfg(any(target_os = "linux", test))]
+mod teardown;
 pub use backend::*;
 pub use controller::Controller;
 pub use gateway::{GithubGateway, Registration, RunnerApi};

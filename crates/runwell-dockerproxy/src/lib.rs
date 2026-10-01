@@ -2,8 +2,13 @@
 //! Docker access remains root-equivalent; this proxy is not an isolation boundary.
 #![deny(missing_docs)]
 
+mod json;
 mod rewrite;
-pub use rewrite::{CgroupDriver, Rewrite, Rewriter, route};
+mod routes;
+pub use rewrite::{CgroupDriver, Rewrite, Rewriter};
+pub use routes::route;
+#[cfg(unix)]
+mod accept;
 #[cfg(unix)]
 mod cleanup;
 #[cfg(unix)]
@@ -30,14 +35,26 @@ pub struct ProxySpec {
     pub node: String,
     /// Existing, limited systemd slice (ci-rw-j<id>.slice).
     pub cgroup_parent: String,
-    /// Job slice MemoryMax in bytes.
-    pub memory_max: u64,
+    /// Job slice MemoryMax in bytes; None means memory.max = max (unlimited).
+    pub memory_max: Option<u64>,
     /// Socket owner's numeric user ID.
     pub uid: u32,
     /// Socket owner's numeric group ID.
     pub gid: u32,
 }
 impl ProxySpec {
+    /// Parse the cgroup-v2 memory.max file, including its unlimited sentinel.
+    pub fn parse_memory_max(value: &str) -> Result<Option<u64>, Error> {
+        match value.trim() {
+            "max" => Ok(None),
+            value => value
+                .parse::<u64>()
+                .ok()
+                .filter(|v| *v > 0 && *v <= i64::MAX as u64)
+                .map(Some)
+                .ok_or(Error::Config),
+        }
+    }
     /// Deterministic runtime socket path, also used when remapping bind sources.
     pub fn socket(&self, settings: &DockerProxyConfig) -> PathBuf {
         settings
@@ -65,6 +82,18 @@ pub enum Error {
     /// Malformed JSON or build labels.
     #[error("invalid Docker proxy rewrite payload")]
     Payload,
+    /// Ambiguous or unsafe path encoding cannot bypass attribution.
+    #[error("Docker proxy rejects encoded slashes, empty, dot or parent path segments")]
+    Path,
+    /// Go's JSON field folding must not disagree with the proxy.
+    #[error("Docker proxy rejects non-ASCII object keys and duplicate attribution fields")]
+    JsonKeys,
+    /// Only Docker's known streaming upgrade endpoints may hijack a connection.
+    #[error("Docker proxy upgrades are allowed only for attach, exec start, session and grpc")]
+    Upgrade,
+    /// Buffered requests must finish within the configured time budget.
+    #[error("Docker proxy JSON body read timed out")]
+    BodyTimeout,
     /// JSON requests have a configurable bounded size.
     #[error("Docker proxy JSON body exceeds configured limit of {0} bytes")]
     BodyTooLarge(usize),

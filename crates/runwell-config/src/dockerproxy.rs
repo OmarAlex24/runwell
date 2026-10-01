@@ -12,6 +12,8 @@ pub struct DockerProxyConfig {
     pub run_dir: PathBuf,
     /// Maximum buffered JSON request size. Streaming bodies are not buffered.
     pub max_json_bytes: usize,
+    /// Deadline for reading an entire buffered JSON request body.
+    pub body_read_seconds: u32,
     /// Cap missing or excessive container Memory at the job MemoryMax.
     pub cap_memory: bool,
     /// Reject privileged containers and host PID/network namespaces.
@@ -25,6 +27,7 @@ impl Default for DockerProxyConfig {
             upstream_socket: "/var/run/docker.sock".into(),
             run_dir: "/run/runwell".into(),
             max_json_bytes: 2 * 1024 * 1024,
+            body_read_seconds: 30,
             cap_memory: true,
             deny_host_access: false,
             stop_seconds: 10,
@@ -45,7 +48,10 @@ impl DockerProxyConfig {
                 return Err(Error::Validation("invalid Docker proxy path".into()));
             }
         }
-        if self.max_json_bytes == 0 || !(1..=3600).contains(&self.stop_seconds) {
+        if self.max_json_bytes == 0
+            || !(1..=3600).contains(&self.stop_seconds)
+            || !(1..=3600).contains(&self.body_read_seconds)
+        {
             return Err(Error::Validation("invalid Docker proxy limits".into()));
         }
         Ok(())

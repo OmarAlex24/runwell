@@ -54,31 +54,6 @@ pub enum Rewrite {
     /// Rewrite query parameters without reading a build context.
     Build,
 }
-/// Match POST routes with an optional exact /v1.<digits> API prefix.
-pub fn route(method: &str, path: &str) -> Option<Rewrite> {
-    if method != "POST" {
-        return None;
-    }
-    let path = if let Some(rest) = path.strip_prefix("/v1.") {
-        let (version, path) = rest.split_once('/')?;
-        if version.is_empty() || !version.bytes().all(|c| c.is_ascii_digit()) {
-            return None;
-        }
-        format!("/{path}")
-    } else {
-        path.into()
-    };
-    match path.as_str() {
-        "/containers/create" => Some(Rewrite::Container),
-        "/networks/create" | "/volumes/create" => Some(Rewrite::Labels),
-        "/build" => Some(Rewrite::Build),
-        _ => path
-            .strip_prefix("/containers/")?
-            .strip_suffix("/update")
-            .filter(|id| !id.is_empty() && !id.contains('/'))
-            .map(|_| Rewrite::Update),
-    }
-}
 /// Immutable rewriting policy for a single proxy.
 #[derive(Clone)]
 pub struct Rewriter {
@@ -96,8 +71,9 @@ impl Rewriter {
         settings.validate().map_err(|_| Error::Config)?;
         if spec.job_id == 0
             || spec.node.is_empty()
-            || spec.memory_max == 0
-            || spec.memory_max > i64::MAX as u64
+            || spec
+                .memory_max
+                .is_some_and(|v| v == 0 || v > i64::MAX as u64)
         {
             return Err(Error::Config);
         }
@@ -113,7 +89,7 @@ impl Rewriter {
         if bytes.len() > self.settings.max_json_bytes {
             return Err(Error::BodyTooLarge(self.settings.max_json_bytes));
         }
-        let mut value: Value = serde_json::from_slice(bytes).map_err(|_| Error::Payload)?;
+        let mut value = crate::json::parse(bytes, crate::json::Scope::Root)?;
         let object = value.as_object_mut().ok_or(Error::Payload)?;
         match kind {
             Rewrite::Container => {
@@ -123,7 +99,9 @@ impl Rewriter {
                     .ok_or(Error::Payload)?;
                 set(host, "CgroupParent", json!(self.parent));
                 self.host_policy(host)?;
-                if self.settings.cap_memory {
+                if self.settings.cap_memory
+                    && let Some(memory_max) = self.spec.memory_max
+                {
                     let memory = take(host, "Memory");
                     let limit = if memory.is_null() {
                         0
@@ -133,9 +111,9 @@ impl Rewriter {
                     host.insert(
                         "Memory".into(),
                         json!(if limit == 0 {
-                            self.spec.memory_max
+                            memory_max
                         } else {
-                            limit.min(self.spec.memory_max)
+                            limit.min(memory_max)
                         }),
                     );
                 }
@@ -222,9 +200,14 @@ impl Rewriter {
         Ok(())
     }
     fn is_socket(&self, source: &str) -> bool {
+        let source = clean_source(source);
         source == "/run/docker.sock"
             || source == "/var/run/docker.sock"
-            || std::path::Path::new(source) == self.settings.upstream_socket
+            || self
+                .settings
+                .upstream_socket
+                .to_str()
+                .is_some_and(|upstream| source == clean_source(upstream))
     }
 }
 // Go's JSON decoder accepts case-insensitive field names. Remove aliases before
@@ -280,7 +263,7 @@ impl Rewriter {
             match key.as_ref() {
                 "cgroupparent" => {}
                 "labels" => {
-                    let input: Value = serde_json::from_str(&value).map_err(|_| Error::Payload)?;
+                    let input = crate::json::parse(value.as_bytes(), crate::json::Scope::Labels)?;
                     if !input.is_null() {
                         labels
                             .as_object_mut()
@@ -301,4 +284,27 @@ impl Rewriter {
         );
         Ok(format!("{path}?{}", kept.join("&")))
     }
+}
+
+// Docker cleans mount sources lexically; do not resolve host symlinks here.
+fn clean_source(source: &str) -> String {
+    let mut parts = Vec::new();
+    for part in source.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.last().is_some_and(|p| *p != "..") {
+                    parts.pop();
+                } else if !source.starts_with('/') {
+                    parts.push(part);
+                }
+            }
+            _ => parts.push(part),
+        }
+    }
+    format!(
+        "{}{}",
+        if source.starts_with('/') { "/" } else { "" },
+        parts.join("/")
+    )
 }

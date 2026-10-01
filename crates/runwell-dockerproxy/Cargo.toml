@@ -13,6 +13,7 @@ workspace = true
 thiserror.workspace = true
 runwell-config = { version = "=0.1.0", path = "../runwell-config" }
 serde_json.workspace = true
+serde.workspace = true
 url.workspace = true
 tracing.workspace = true
 
@@ -25,7 +26,5 @@ tokio.workspace = true
 tokio-util.workspace = true
 bollard.workspace = true
 rustix.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true
 futures-util.workspace = true

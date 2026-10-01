@@ -113,21 +113,30 @@ impl DockerResources {
     /// Stop, force-remove containers, then remove networks and labeled volumes.
     /// Missing/already-stopped objects are successful, making retries idempotent.
     pub async fn cleanup(&self, job: u64) -> Result<(), Error> {
+        // The caller has cancelled all proxy requests. A daemon may still finish
+        // a committed create after cancellation, so always take a fresh inventory.
+        let first = self.cleanup_pass(job).await;
+        let second = self.cleanup_pass(job).await;
+        first.and(second)
+    }
+    async fn cleanup_pass(&self, job: u64) -> Result<(), Error> {
         let objects = self.objects(Some(job)).await?;
-        for (_, id) in &objects.containers {
+        futures_util::future::join_all(objects.containers.iter().map(|(_, id)| async move {
             // A failed graceful stop still proceeds to force removal. Only the
             // final removal determines whether durable cleanup can be completed.
-            let _ = self
-                .docker
-                .stop_container(
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(u64::from(self.stop_seconds) + 1),
+                self.docker.stop_container(
                     id,
                     Some(StopContainerOptions {
                         t: Some(self.stop_seconds as i32),
                         ..Default::default()
                     }),
-                )
-                .await;
-        }
+                ),
+            )
+            .await;
+        }))
+        .await;
         let mut failed = false;
         for (_, id) in &objects.containers {
             failed |= !removed(
@@ -136,7 +145,7 @@ impl DockerResources {
                         id,
                         Some(RemoveContainerOptions {
                             force: true,
-                            v: false,
+                            v: true,
                             ..Default::default()
                         }),
                     )

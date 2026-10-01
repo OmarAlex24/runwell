@@ -9,10 +9,11 @@ fn docker_proxy_defaults_and_explicit_settings() {
         "/var/run/docker.sock"
     );
     assert_eq!(proxy.max_json_bytes, 2 * 1024 * 1024);
+    assert_eq!(proxy.body_read_seconds, 30);
     assert!(proxy.cap_memory);
     assert!(!proxy.deny_host_access);
     let source = format!(
-        "{EXAMPLE}\n[standalone.docker_proxy]\nrun_dir = '/run/custom'\nmax_json_bytes = 4096\ncap_memory = false\ndeny_host_access = true\n"
+        "{EXAMPLE}\n[standalone.docker_proxy]\nrun_dir = '/run/custom'\nmax_json_bytes = 4096\nbody_read_seconds = 2\ncap_memory = false\ndeny_host_access = true\n"
     );
     let proxy = Config::from_toml(&source)
         .unwrap()
@@ -20,6 +21,7 @@ fn docker_proxy_defaults_and_explicit_settings() {
         .unwrap()
         .docker_proxy;
     assert_eq!(proxy.max_json_bytes, 4096);
+    assert_eq!(proxy.body_read_seconds, 2);
     assert!(!proxy.cap_memory);
     assert!(proxy.deny_host_access);
 }
@@ -28,6 +30,8 @@ fn docker_proxy_rejects_invalid_and_unknown_settings() {
     for setting in [
         "max_json_bytes = 0",
         "stop_seconds = 0",
+        "body_read_seconds = 0",
+        "body_read_seconds = 3601",
         "stop_seconds = 3601",
         "run_dir = 'relative'",
         "run_dir = '/tmp/../run'",

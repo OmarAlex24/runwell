@@ -103,19 +103,9 @@ impl Drop for Proxy {
     }
 }
 async fn accept(listener: UnixListener, state: Arc<State>) {
-    loop {
-        let result = tokio::select! {
-            biased;
-            _ = state.accept_cancel.cancelled() => break,
-            result = listener.accept() => result,
-        };
-        let (stream, _) = match result {
-            Ok(value) => value,
-            Err(_) => {
-                tracing::error!("Docker proxy accept failed");
-                break;
-            }
-        };
+    while let Some((stream, _)) =
+        crate::accept::retry(|| listener.accept(), &state.accept_cancel).await
+    {
         let service = state.clone();
         state.spawn(async move {
             let result = hyper::server::conn::http1::Builder::new()
@@ -143,29 +133,47 @@ async fn accept(listener: UnixListener, state: Arc<State>) {
         });
     }
 }
+fn asks_upgrade(request: &Request<Incoming>) -> bool {
+    request.headers().contains_key(header::UPGRADE)
+        || request
+            .headers()
+            .get_all(header::CONNECTION)
+            .iter()
+            .any(|header| {
+                header.to_str().is_ok_and(|value| {
+                    value
+                        .split(',')
+                        .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+                })
+            })
+}
 async fn dispatch(request: Request<Incoming>, state: Arc<State>) -> Result<Response<Body>, Error> {
-    if route(request.method().as_str(), request.uri().path())
-        .is_some_and(|kind| kind != Rewrite::Build)
+    let kind = route(request.method().as_str(), request.uri().path())?;
+    if asks_upgrade(&request)
+        && !crate::routes::upgrade_allowed(request.method().as_str(), request.uri().path())?
     {
+        return Err(Error::Upgrade);
+    }
+    if kind.is_some_and(|kind| kind != Rewrite::Build) {
         let (send, receive) = oneshot::channel();
         let worker = state.clone();
         state.spawn(async move {
-            let _ = send.send(forward(request, worker).await);
+            let _ = send.send(forward(request, worker, kind).await);
         });
         receive.await.map_err(|_| Error::Upstream)?
     } else {
-        forward(request, state).await
+        forward(request, state, kind).await
     }
 }
 async fn forward(
     mut request: Request<Incoming>,
     state: Arc<State>,
+    kind: Option<Rewrite>,
 ) -> Result<Response<Body>, Error> {
     let upgrade = request
         .headers()
         .contains_key(header::UPGRADE)
         .then(|| hyper::upgrade::on(&mut request));
-    let kind = route(request.method().as_str(), request.uri().path());
     let _mutation = if kind.is_some_and(|kind| kind != Rewrite::Build) {
         Some(state.mutations.read().await)
     } else {
@@ -203,7 +211,12 @@ async fn forward(
         {
             return Err(Error::BodyTooLarge(limit));
         }
-        let bytes = bounded(incoming, limit).await?;
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(u64::from(state.rewrite.settings.body_read_seconds)),
+            bounded(incoming, limit),
+        )
+        .await
+        .map_err(|_| Error::BodyTimeout)??;
         let bytes = state.rewrite.json(kind, &bytes)?;
         parts.headers.remove(header::TRANSFER_ENCODING);
         parts.headers.remove(header::TRAILER);
@@ -264,7 +277,10 @@ async fn bounded(mut body: Incoming, limit: usize) -> Result<Bytes, Error> {
 fn error_response(error: Error) -> Response<Body> {
     let status = match error {
         Error::BodyTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
-        Error::Payload | Error::CgroupUpdate => StatusCode::BAD_REQUEST,
+        Error::Payload | Error::CgroupUpdate | Error::Path | Error::JsonKeys | Error::Upgrade => {
+            StatusCode::BAD_REQUEST
+        }
+        Error::BodyTimeout => StatusCode::REQUEST_TIMEOUT,
         Error::HostAccess => StatusCode::FORBIDDEN,
         Error::Stopping => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_GATEWAY,

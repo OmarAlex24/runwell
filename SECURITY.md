@@ -26,11 +26,12 @@ make the API safe for untrusted workloads. Jobs must not have a direct route to
 the host Docker socket; account and filesystem permissions must enforce this.
 
 The in-process proxy adds job/node labels to explicitly created containers,
-networks and volumes. Teardown only removes objects carrying both matching
-labels, after stopping the proxy; it never prunes shared daemon resources.
-Anonymous/implicit volumes without runwell labels and shared image/build caches
-are intentionally outside this cleanup. The default per-container memory cap
-complements the aggregate slice ceiling; CPU and other user limits are preserved.
+networks and volumes. Teardown selects objects by both matching labels after
+stopping the proxy; it never prunes shared daemon resources.
+Removing an owned container also removes its anonymous volumes (`v=true`).
+Unlabeled named volumes and shared image/build caches are not explicitly removed.
+The default per-container memory cap complements the aggregate slice ceiling;
+CPU and other user limits are preserved.
 
 `standalone.docker_proxy.deny_host_access` optionally refuses `Privileged=true`
 and host PID/network namespaces. It defaults to false for CI compatibility;
@@ -39,8 +40,10 @@ root-equivalent API capabilities remain available, including access to objects
 belonging to other jobs. This is an attribution aid, not an authorization layer.
 
 BuildKit upgrade tunnels are passed through as opaque streams. Buildx solves
-sent over `/grpc`, and shared BuildKit workers that ignore the `/build` cgroup
-option, are not guaranteed to run below the job slice. Do not assume that a
+sent over `/grpc` can set their own cgroup parent through BuildKit's control API.
+This is a known attribution gap; `/grpc` remains enabled for buildx's Docker
+driver. Those solves and shared BuildKit workers that ignore the `/build` cgroup
+option are not guaranteed to run below the job slice. Do not assume that a
 successful proxied build proves full resource attribution. See the
 [proxy scope and tests](crates/runwell-dockerproxy/README.md#buildkit-scope).
 

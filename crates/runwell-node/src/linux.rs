@@ -276,10 +276,7 @@ impl NodeBackend for LinuxBackend {
         })
     }
     fn stop_runner(&self, id: u64) -> NodeFuture<'_, ()> {
-        Box::pin(async move {
-            self.systemd.stop(&service_unit(id)).await?;
-            self.cleanup_proxy(id).await
-        })
+        Box::pin(self.teardown_job(id, true))
     }
     fn inventory(&self) -> NodeFuture<'_, Vec<LocalJob>> {
         Box::pin(async {
@@ -302,16 +299,6 @@ impl NodeBackend for LinuxBackend {
         })
     }
     fn cleanup(&self, id: u64) -> NodeFuture<'_, ()> {
-        Box::pin(async move {
-            self.systemd.stop(&service_unit(id)).await?;
-            self.cleanup_proxy(id).await?;
-            self.systemd.stop(&slice_unit(id)).await?;
-            credentials::remove(id)?;
-            runwell_runner::remove_install(
-                &self.settings.runners_dir,
-                &self.settings.runners_dir.join(format!("j{id}")),
-            )?;
-            Ok(())
-        })
+        Box::pin(self.teardown_job(id, false))
     }
 }

@@ -65,14 +65,14 @@ async fn manager_detects_once_recovers_socket_and_cleans_only_exact_labels_in_or
         .iter()
         .filter(|c| c.starts_with("POST") || c.starts_with("DELETE"))
         .collect();
-    assert_eq!(mutations.len(), 8);
+    assert_eq!(mutations.len(), 16);
     for chunk in mutations.chunks(4) {
         assert!(
             chunk[0].starts_with("POST /containers/owned/stop?t=10"),
             "{chunk:?}"
         );
         assert!(chunk[1].starts_with("DELETE /containers/owned?"));
-        assert!(chunk[1].contains("v=false"));
+        assert!(chunk[1].contains("v=true"));
         assert_eq!(chunk[2].as_str(), "DELETE /networks/network");
         assert_eq!(chunk[3].as_str(), "DELETE /volumes/volume?force=true");
     }

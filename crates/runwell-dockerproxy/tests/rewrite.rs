@@ -8,14 +8,16 @@ fn spec() -> ProxySpec {
         job_id: 42,
         node: "node-a".into(),
         cgroup_parent: "ci-rw-j42.slice".into(),
-        memory_max: 1024,
+        memory_max: Some(1024),
         uid: 501,
         gid: 20,
     }
 }
 #[test]
 fn paths_match_only_exact_versioned_or_unversioned_post_operations() {
-    for prefix in ["", "/v1.24", "/v1.99"] {
+    for prefix in [
+        "", "/v1.24", "/v1.99", "/v1.45.0", "/v01.45", "/v2.1", "/v1.",
+    ] {
         for (path, kind) in [
             ("/containers/create", Rewrite::Container),
             ("/networks/create", Rewrite::Labels),
@@ -23,22 +25,22 @@ fn paths_match_only_exact_versioned_or_unversioned_post_operations() {
             ("/build", Rewrite::Build),
             ("/containers/abc/update", Rewrite::Update),
         ] {
-            assert_eq!(route("POST", &format!("{prefix}{path}")), Some(kind));
-            assert_eq!(route("GET", &format!("{prefix}{path}")), None);
+            assert_eq!(
+                route("POST", &format!("{prefix}{path}")).unwrap(),
+                Some(kind)
+            );
+            assert_eq!(route("GET", &format!("{prefix}{path}")).unwrap(), None);
         }
     }
     for path in [
-        "/v2.1/build",
-        "/v1./build",
         "/v1.x/build",
         "/build/",
-        "/containers//update",
         "/containers/a/b/update",
         "/session",
         "/grpc",
         "/containers/a/archive",
     ] {
-        assert_eq!(route("POST", path), None);
+        assert_eq!(route("POST", path).unwrap(), None);
     }
 }
 #[test]
@@ -143,6 +145,11 @@ fn updates_refuse_parent_and_preserve_other_bodies_exactly() {
 #[test]
 fn case_aliases_cannot_override_forced_fields() {
     let input = br#"{"HostConfig":{"cgroupParent":"escape"},"hostconfig":{"Memory":9999},"labels":{"io.runwell.job":"escape"}}"#;
+    assert!(matches!(
+        policy().json(Rewrite::Container, input),
+        Err(Error::JsonKeys)
+    ));
+    let input = br#"{"hostconfig":{"cgroupParent":"escape","Memory":9999},"labels":{"io.runwell.job":"escape"}}"#;
     let result: Value =
         serde_json::from_slice(&policy().json(Rewrite::Container, input).unwrap()).unwrap();
     assert!(result.get("hostconfig").is_none());

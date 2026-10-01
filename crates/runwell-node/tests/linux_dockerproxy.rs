@@ -165,6 +165,8 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
             &format!("{volume}:/data"),
             "-v",
             "/var/run/docker.sock:/var/run/docker.sock",
+            "-v",
+            "/anonymous",
             "busybox:1.37",
             "sh",
             "-c",
@@ -184,6 +186,14 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
         "m4a-test"
     );
     assert_eq!(inspect[0]["HostConfig"]["Memory"], slice.memory_max);
+    let anonymous = inspect[0]["Mounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mount| mount["Destination"] == "/anonymous")
+        .unwrap()["Name"]
+        .as_str()
+        .unwrap();
     let pid = inspect[0]["State"]["Pid"].as_u64().unwrap();
     let membership = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
     assert!(
@@ -256,6 +266,7 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
         vec!["inspect", nested.as_str()],
         vec!["network", "inspect", network.as_str()],
         vec!["volume", "inspect", volume.as_str()],
+        vec!["volume", "inspect", anonymous],
     ] {
         assert!(!docker(&upstream, &args, None).await.status.success());
     }

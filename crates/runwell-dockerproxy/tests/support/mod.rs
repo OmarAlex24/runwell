@@ -23,6 +23,7 @@ pub struct Fixture {
     pub spec: ProxySpec,
     pub proxy: Option<Proxy>,
     cancel: CancellationToken,
+    upstream: Option<tokio::task::JoinHandle<()>>,
 }
 impl Fixture {
     pub async fn new<F, Fut>(handler: F) -> Self
@@ -42,7 +43,7 @@ impl Fixture {
             job_id: 42,
             node: "node-a".into(),
             cgroup_parent: "ci-rw-j42.slice".into(),
-            memory_max: 1024,
+            memory_max: Some(1024),
             uid: rustix::process::geteuid().as_raw(),
             gid: rustix::process::getegid().as_raw(),
         };
@@ -50,7 +51,7 @@ impl Fixture {
         let cancel = CancellationToken::new();
         let stop = cancel.clone();
         let handler = Arc::new(handler);
-        tokio::spawn(async move {
+        let upstream = tokio::spawn(async move {
             let mut connections = JoinSet::new();
             loop {
                 tokio::select! {
@@ -77,7 +78,12 @@ impl Fixture {
             spec,
             proxy: None,
             cancel,
+            upstream: Some(upstream),
         }
+    }
+    pub async fn stop_upstream(&mut self) {
+        self.cancel.cancel();
+        self.upstream.take().unwrap().await.unwrap();
     }
     pub async fn start(&mut self) {
         self.proxy = Some(

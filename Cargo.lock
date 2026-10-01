@@ -2125,6 +2125,7 @@ dependencies = [
  "hyper-util",
  "runwell-config",
  "rustix",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
