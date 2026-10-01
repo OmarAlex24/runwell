@@ -255,3 +255,67 @@ async fn jit_environment_is_private_and_home_is_per_job() {
     backend.cleanup(id).await.unwrap();
     assert!(!std::path::Path::new(&credential).exists());
 }
+
+#[tokio::test]
+#[ignore = "requires Linux root, systemd PID 1 and unified cgroup v2"]
+async fn systemd_hides_other_jobs_homes_and_binds_only_own_home() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = HOST.lock().await;
+    let (temp, config, backend) = backend().await;
+    std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o711)).unwrap();
+    let settings = config.standalone.as_ref().unwrap();
+    let id = 8_000_004;
+    let directory = settings.runners_dir.join(format!("j{id}"));
+    let workspace = temp.path().join("workspaces");
+    let home = workspace.join(format!("jobs/{id}/home"));
+    let other = workspace.join("jobs/99/home");
+    let user = runwell_runner::RunnerUser::resolve("nobody").unwrap();
+    for path in [&home, &other] {
+        std::fs::create_dir_all(path).unwrap();
+        std::fs::write(path.join("data"), b"private").unwrap();
+        user.own_install(path).unwrap();
+    }
+    std::fs::create_dir_all(directory.join("bin")).unwrap();
+    std::fs::create_dir(directory.join("home")).unwrap();
+    let executable = directory.join("bin/Runner.Listener");
+    std::fs::write(
+        &executable,
+        format!(
+            r#"#!/bin/sh
+set -eu
+test "$HOME" = '{}'
+test "$(cat "$HOME/data")" = private
+echo own > "$HOME/own"
+! cat '{}'
+! sh -c 'echo poison > "$1"' probe '{}'
+"#,
+            home.display(),
+            other.join("data").display(),
+            other.join("data").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o555)).unwrap();
+    user.own_install(&directory).unwrap();
+    let plan = JobPlan {
+        slice: limits(id, 64 * 1024 * 1024),
+        directory: directory.clone(),
+        template_version: "probe".into(),
+    };
+    backend.create_slice(&plan.slice).await.unwrap();
+    backend
+        .start(
+            &plan,
+            &runwell_runner::LaunchSpec {
+                agent_id: 42,
+                install_dir: directory,
+                jit_config: secrecy::SecretString::from("synthetic-jit"),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(exited(&backend, id).await, ProcessState::Exited(Some(0)));
+    assert_eq!(std::fs::read(home.join("own")).unwrap(), b"own\n");
+    assert_eq!(std::fs::read(other.join("data")).unwrap(), b"private");
+    backend.cleanup(id).await.unwrap();
+}

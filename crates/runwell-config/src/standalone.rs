@@ -9,6 +9,9 @@ pub struct StandaloneConfig {
     /// Per-job Docker attribution proxy settings.
     #[serde(default)]
     pub docker_proxy: super::DockerProxyConfig,
+    /// Isolated warm HOME caches.
+    #[serde(default)]
+    pub workspace: super::WorkspaceConfig,
     /// Maximum simultaneous reservations on this host.
     pub max_jobs: u32,
     /// Reservation capacity multipliers.
@@ -65,6 +68,17 @@ pub struct RunnerConfig {
 impl StandaloneConfig {
     pub(super) fn validate(&self, config: &Config) -> Result<(), Error> {
         self.docker_proxy.validate()?;
+        self.workspace.validate()?;
+        if let Some(root) = &self.workspace.cache_root
+            && (root.starts_with(&self.runners_dir)
+                || self.runners_dir.starts_with(root)
+                || root.starts_with(&self.templates_dir)
+                || self.templates_dir.starts_with(root))
+        {
+            return Err(Error::Validation(
+                "workspace cache root must not overlap runners or templates".into(),
+            ));
+        }
         let require = |ok, message: &str| {
             if ok {
                 Ok(())

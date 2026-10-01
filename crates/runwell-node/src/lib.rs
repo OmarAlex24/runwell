@@ -14,6 +14,8 @@ pub mod linux;
 mod runtime;
 #[cfg(any(target_os = "linux", test))]
 mod teardown;
+#[cfg(any(target_os = "linux", test))]
+mod workspace_trust;
 pub use backend::*;
 pub use controller::Controller;
 pub use gateway::{GithubGateway, Registration, RunnerApi};
@@ -49,6 +51,9 @@ pub enum Error {
     /// Sanitized persistent store error.
     #[error(transparent)]
     Store(#[from] runwell_store::Error),
+    /// Workspace preparation or mount cleanup failed.
+    #[error(transparent)]
+    Workspace(#[from] runwell_workspace::Error),
     /// Sanitized runner template error.
     #[error(transparent)]
     Runner(#[from] runwell_runner::Error),

@@ -3,6 +3,8 @@ mod bootstrap;
 mod credentials;
 mod proxy;
 mod systemd;
+mod workspace_unit;
+mod workspaces;
 use crate::*;
 pub use bootstrap::standalone;
 use runwell_admission::Pressure;
@@ -38,11 +40,18 @@ pub struct LinuxBackend {
     user: RunnerUser,
     releases: ReleaseClient,
     templates: Mutex<Templates>,
+    workspaces: workspaces::Workspaces,
     docker_proxy: Option<runwell_dockerproxy::ProxyManager>,
 }
 impl LinuxBackend {
     /// Connect to systemd; require cgroup v2 and the configured local runner user.
     pub async fn connect(settings: StandaloneConfig) -> Result<Self, Error> {
+        Self::connect_with_github(settings, None).await
+    }
+    pub(super) async fn connect_with_github(
+        settings: StandaloneConfig,
+        github: Option<&runwell_config::GithubConfig>,
+    ) -> Result<Self, Error> {
         require_root()?;
         if !cfg!(target_arch = "x86_64")
             || !std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").is_file()
@@ -51,9 +60,18 @@ impl LinuxBackend {
         }
         let user = RunnerUser::resolve(&settings.runner_user)?;
         let systemd = Systemd::connect(settings.stop_seconds).await?;
+        let workspaces = workspaces::Workspaces::new(
+            &settings,
+            runwell_workspace::Owner {
+                uid: user.uid,
+                gid: user.gid,
+            },
+            github,
+        )?;
         Ok(Self {
             docker_proxy: None,
             settings,
+            workspaces,
             systemd,
             user,
             releases: ReleaseClient::new()?,
@@ -62,6 +80,14 @@ impl LinuxBackend {
                 checked: None,
                 force: false,
             }),
+        })
+    }
+    fn workspace_home(&self, plan: &JobPlan) -> Result<std::path::PathBuf, Error> {
+        let home = self.workspaces.home(plan.slice.job_id)?;
+        Ok(if home.exists() {
+            home
+        } else {
+            plan.directory.join("home")
         })
     }
     async fn current(&self) -> Result<Template, Error> {
@@ -166,6 +192,7 @@ impl LinuxBackend {
                     arguments,
                     environment: vec![],
                     environment_files: vec![],
+                    workspace_home: None,
                 },
             )
             .await
@@ -239,6 +266,32 @@ impl NodeBackend for LinuxBackend {
             Ok(())
         })
     }
+    fn prepare_workspace<'a>(&'a self, job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(self.workspaces.prepare(job))
+    }
+    fn bind_workspace(
+        &self,
+        id: u64,
+        execution: runwell_workspace::Execution,
+    ) -> NodeFuture<'_, ()> {
+        Box::pin(self.workspaces.bind(id, execution))
+    }
+    fn reconcile_workspaces<'a>(
+        &'a self,
+        retained: &'a std::collections::HashSet<u64>,
+    ) -> NodeFuture<'a, ()> {
+        Box::pin(self.workspaces.reconcile(retained.clone()))
+    }
+    fn harvest_workspace<'a>(&'a self, job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(async move {
+            // Stop all descendants before reading cache files. Docker cleanup
+            // must also have completed before invoking this lifecycle hook.
+            self.systemd.stop(&service_unit(job.id as u64)).await?;
+            self.systemd.stop(&slice_unit(job.id as u64)).await?;
+            self.workspaces.harvest(job).await;
+            Ok(())
+        })
+    }
     fn start<'a>(&'a self, plan: &'a JobPlan, launch: &'a LaunchSpec) -> NodeFuture<'a, ()> {
         Box::pin(async move {
             if launch.install_dir != plan.directory
@@ -257,6 +310,7 @@ impl NodeBackend for LinuxBackend {
                     &plan.directory,
                     &self.user.name,
                     &launch.jit_config,
+                    &self.workspace_home(plan)?,
                     environment,
                 )
                 .await

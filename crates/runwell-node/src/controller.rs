@@ -209,7 +209,18 @@ impl Controller {
             if job.metadata.scale_set_id != set || (agent > 0 && runner.agent_id != Some(agent)) {
                 return Err(Error::Github);
             }
+            let evidence = runwell_workspace::Execution {
+                request_id: request,
+                workflow_run_id: event.workflow_run_id,
+                repository: execution.repo.clone(),
+            };
             self.store.bind(job.id, execution, outcome).await?;
+            if evidence.workflow_run_id > 0
+                && runwell_config::valid_repository(&evidence.repository)
+                && !runner.cleaned
+            {
+                self.backend.bind_workspace(job.id as u64, evidence).await?;
+            }
         } else if outcome.is_some() {
             // A queued job can be canceled before any runner is assigned.
             for job in self.store.jobs().await?.iter().filter(|j| {

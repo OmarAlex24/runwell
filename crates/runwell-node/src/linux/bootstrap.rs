@@ -71,7 +71,7 @@ pub async fn standalone(config: Config) -> Result<(), Error> {
         }
     }
     let backend = Arc::new(
-        LinuxBackend::connect(settings)
+        LinuxBackend::connect_with_github(settings, Some(&config.github))
             .await?
             .with_docker_proxy(config.node.id.clone()),
     );

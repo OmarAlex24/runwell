@@ -85,6 +85,29 @@ pub trait NodeBackend: Send + Sync {
     }
     /// Create the limited slice and private installation before registration.
     fn prepare<'a>(&'a self, plan: &'a JobPlan) -> NodeFuture<'a, ()>;
+    /// Prepare warm HOME after installation and before JIT registration.
+    fn prepare_workspace<'a>(&'a self, _job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    /// Persist actual assignment metadata before the queue delivery is acked.
+    fn bind_workspace(
+        &self,
+        _id: u64,
+        _execution: runwell_workspace::Execution,
+    ) -> NodeFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    /// Reconcile mounts using durable jobs retained for adoption or cleanup.
+    fn reconcile_workspaces<'a>(
+        &'a self,
+        _retained: &'a std::collections::HashSet<u64>,
+    ) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    /// Harvest after success is journaled and all job writers are stopped.
+    fn harvest_workspace<'a>(&'a self, _job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
     /// Start Runner.Listener directly; duplicate starts must not replace a unit.
     fn start<'a>(&'a self, plan: &'a JobPlan, launch: &'a LaunchSpec) -> NodeFuture<'a, ()>;
     /// Restore in-process resources for a surviving runner during reconcile.

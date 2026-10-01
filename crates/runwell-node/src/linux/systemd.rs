@@ -17,9 +17,13 @@ pub(super) struct ProcessCommand<'a> {
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub environment_files: Vec<(String, bool)>,
+    pub workspace_home: Option<&'a Path>,
 }
-type Properties = Vec<(String, OwnedValue)>;
-fn property<'a>(name: &str, value: impl Into<Value<'a>>) -> Result<(String, OwnedValue), Error> {
+pub(super) type Properties = Vec<(String, OwnedValue)>;
+pub(super) fn property<'a>(
+    name: &str,
+    value: impl Into<Value<'a>>,
+) -> Result<(String, OwnedValue), Error> {
     Ok((
         name.into(),
         OwnedValue::try_from(value.into()).map_err(|_| Error::Systemd)?,
@@ -132,12 +136,13 @@ impl Systemd {
         directory: &Path,
         user: &str,
         secret: &SecretString,
+        home: &Path,
         environment: Vec<String>,
     ) -> Result<(), Error> {
         let executable = directory.join("bin/Runner.Listener");
         let exe = executable.to_str().ok_or(Error::Config)?;
         let mut env = vec![
-            format!("HOME={}", directory.join("home").display()),
+            format!("HOME={}", home.display()),
             "ACTIONS_RUNNER_RETURN_VERSION_DEPRECATED_EXIT_CODE=1".into(),
             "PATH=/usr/local/bin:/usr/bin:/bin".into(),
         ];
@@ -152,6 +157,7 @@ impl Systemd {
                 arguments: vec![exe.into(), "run".into()],
                 environment: env,
                 environment_files: vec![(environment_file, false)],
+                workspace_home: (home != directory.join("home")).then_some(home),
             },
         )
         .await
@@ -174,41 +180,38 @@ impl Systemd {
             command.arguments,
             false,
         )]);
-        self.transient(
-            &service_unit(id),
-            vec![
-                property("Description", "Runwell ephemeral runner")?,
-                property("Slice", slice_unit(id))?,
-                property("User", user)?,
-                property("WorkingDirectory", directory.to_str().ok_or(Error::Config)?)?,
-                property("ExecStart", exec)?,
-                property("Environment", Value::new(command.environment))?,
-                property("EnvironmentFiles", Value::new(command.environment_files))?,
-                property("KillMode", "control-group")?,
-                property(
-                    "TimeoutStopUSec",
-                    self.stop_seconds.saturating_mul(1_000_000),
-                )?,
-                property("RemainAfterExit", true)?,
-                property("Type", "exec")?,
-                property("Restart", "no")?,
-                property("UMask", 0o077_u32)?,
-                property("NoNewPrivileges", true)?,
-                property("ProtectControlGroups", true)?,
-                // The runner reaches Docker through its per-job proxy socket.
-                // Keep default direct daemon sockets inaccessible.
-                property(
-                    "InaccessiblePaths",
-                    Value::new(vec![
-                        "-/run/docker.sock".to_owned(),
-                        "-/run/containerd/containerd.sock".to_owned(),
-                    ]),
-                )?,
-                property("StandardOutput", "null")?,
-                property("StandardError", "null")?,
-            ],
-        )
-        .await
+        let mut properties = vec![
+            property("Description", "Runwell ephemeral runner")?,
+            property("Slice", slice_unit(id))?,
+            property("User", user)?,
+            property("WorkingDirectory", directory.to_str().ok_or(Error::Config)?)?,
+            property("ExecStart", exec)?,
+            property("Environment", Value::new(command.environment))?,
+            property("EnvironmentFiles", Value::new(command.environment_files))?,
+            property("KillMode", "control-group")?,
+            property(
+                "TimeoutStopUSec",
+                self.stop_seconds.saturating_mul(1_000_000),
+            )?,
+            property("RemainAfterExit", true)?,
+            property("Type", "exec")?,
+            property("Restart", "no")?,
+            property("UMask", 0o077_u32)?,
+            property("NoNewPrivileges", true)?,
+            property("ProtectControlGroups", true)?,
+            // Direct privileged sockets remain inaccessible to runners.
+            property(
+                "InaccessiblePaths",
+                Value::new(vec![
+                    "-/run/docker.sock".to_owned(),
+                    "-/run/containerd/containerd.sock".to_owned(),
+                ]),
+            )?,
+            property("StandardOutput", "null")?,
+            property("StandardError", "null")?,
+        ];
+        properties.extend(super::workspace_unit::properties(command.workspace_home)?);
+        self.transient(&service_unit(id), properties).await
     }
     async fn unit_path(
         &self,
