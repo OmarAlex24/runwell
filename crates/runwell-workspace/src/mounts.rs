@@ -9,7 +9,7 @@ pub(crate) struct Mount {
 pub(crate) fn scan() -> Result<Vec<Mount>, Error> {
     #[cfg(target_os = "linux")]
     {
-        parse(&std::fs::read_to_string("/proc/self/mountinfo")?)
+        Ok(parse(&std::fs::read("/proc/self/mountinfo")?))
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -17,31 +17,46 @@ pub(crate) fn scan() -> Result<Vec<Mount>, Error> {
     }
 }
 #[cfg(any(target_os = "linux", test))]
-fn parse(input: &str) -> Result<Vec<Mount>, Error> {
+fn parse(input: &[u8]) -> Vec<Mount> {
     let mut mounts = Vec::new();
-    for line in input.lines() {
-        let Some((left, right)) = line.split_once(" - ") else {
-            return Err(Error::Invalid);
-        };
-        let right: Vec<_> = right.split_whitespace().collect();
-        if right.first() != Some(&"overlay") {
-            continue;
-        }
-        let left: Vec<_> = left.split_whitespace().collect();
-        let home = decode(left.get(4).ok_or(Error::Invalid)?)?;
-        let options = right.get(2).ok_or(Error::Invalid)?;
-        for lower in options
-            .split(',')
-            .filter_map(|o| o.strip_prefix("lowerdir="))
-            .flat_map(|l| l.split(':'))
-        {
-            mounts.push(Mount {
-                home: PathBuf::from(&home),
-                lower: decode(lower)?.into(),
-            });
+    for line in input.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+        match parse_line(line) {
+            Ok(entries) => mounts.extend(entries),
+            Err(error) => tracing::warn!(%error, "skipping undecodable mountinfo entry"),
         }
     }
-    Ok(mounts)
+    mounts
+}
+#[cfg(any(target_os = "linux", test))]
+fn parse_line(line: &[u8]) -> Result<Vec<Mount>, Error> {
+    let line = std::str::from_utf8(line).map_err(|_| Error::Invalid)?;
+    let (left, right) = line.split_once(" - ").ok_or(Error::Invalid)?;
+    let right: Vec<_> = right.split_whitespace().collect();
+    let left: Vec<_> = left.split_whitespace().collect();
+    let home = decode(left.get(4).ok_or(Error::Invalid)?)?;
+    if right.first() != Some(&"overlay") {
+        return Ok(Vec::new());
+    }
+    let options = right.get(2).ok_or(Error::Invalid)?;
+    let mut result = Vec::new();
+    for lower in options
+        .split(',')
+        .filter_map(|o| o.strip_prefix("lowerdir="))
+        .flat_map(|l| l.split(':'))
+    {
+        let lower = PathBuf::from(decode(lower)?);
+        let lower =
+            if right.get(1) == Some(&"runwell") && lower.file_name().is_some_and(|n| n == "base") {
+                std::fs::read_link(lower.join(".generation"))?
+            } else {
+                lower
+            };
+        result.push(Mount {
+            home: PathBuf::from(&home),
+            lower,
+        });
+    }
+    Ok(result)
 }
 #[cfg(any(target_os = "linux", test))]
 fn decode(input: &str) -> Result<String, Error> {
@@ -64,22 +79,34 @@ fn decode(input: &str) -> Result<String, Error> {
     String::from_utf8(bytes).map_err(|_| Error::Invalid)
 }
 pub(crate) fn job_id(root: &Path, home: &Path) -> Option<u64> {
-    let relative = home.strip_prefix(root.join("jobs")).ok()?;
+    let (relative, private) = if let Ok(relative) = home.strip_prefix(root.join("jobs")) {
+        (relative, false)
+    } else {
+        (home.strip_prefix(root.join("upper")).ok()?, true)
+    };
     let mut parts = relative.components();
     let id = parts.next()?.as_os_str().to_str()?.parse().ok()?;
-    if parts.next()?.as_os_str() != "home" || parts.next().is_some() {
-        return None;
+    let tail = parts.as_path();
+    if (!private && tail == Path::new("home")) || (private && tail == Path::new("merged")) {
+        Some(id)
+    } else {
+        None
     }
-    Some(id)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn parses_escaped_mount_paths_and_multiple_lowers() {
-        let mounts = parse("24 1 0:1 / /run/a\\040b/jobs/4/home rw - overlay runwell rw,lowerdir=/cache/a:/cache/b,upperdir=/upper").unwrap();
+        let mounts = parse(b"24 1 0:1 / /run/a\\040b/jobs/4/home rw - overlay runwell rw,lowerdir=/cache/a:/cache/b,upperdir=/upper");
         assert_eq!(mounts.len(), 2);
         assert_eq!(job_id(Path::new("/run/a b"), &mounts[0].home), Some(4));
         assert_eq!(mounts[1].lower, Path::new("/cache/b"));
+    }
+    #[test]
+    fn malformed_and_non_utf8_foreign_mounts_do_not_hide_managed_mounts() {
+        let mounts = parse(b"invalid\n24 1 0:1 / /foreign\\777 rw - overlay docker rw,lowerdir=/bad\n24 1 0:1 / /foreign\xff rw - overlay docker rw,lowerdir=/bad\n24 1 0:1 / /run/jobs/4/home rw - overlay runwell rw,lowerdir=/cache/good\n");
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].lower, Path::new("/cache/good"));
     }
 }

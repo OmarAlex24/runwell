@@ -13,9 +13,13 @@ pub struct WorkspaceConfig {
     pub promotion_interval_seconds: u64,
     /// Maximum logical bytes in one generation (including hardlinked files).
     pub max_generation_bytes: u64,
+    /// Maximum files and directories in a generation.
+    pub max_generation_entries: u64,
+    /// Maximum path depth below the generation root.
+    pub max_generation_depth: usize,
     /// Number of newest generations retained in addition to any live references.
     pub keep_generations: usize,
-    /// Permit successful same-repository pull requests to populate caches.
+    /// Permit successful same-repository PRs to populate a separate PR cache key.
     pub allow_pull_requests: bool,
     /// Additional case-insensitive path globs; `*` matches any characters.
     pub excludes: Vec<String>,
@@ -30,6 +34,8 @@ impl Default for WorkspaceConfig {
             per_class: false,
             promotion_interval_seconds: 6 * 60 * 60,
             max_generation_bytes: 20 * 1024 * 1024 * 1024,
+            max_generation_entries: 1_000_000,
+            max_generation_depth: 64,
             keep_generations: 2,
             allow_pull_requests: false,
             excludes: Vec::new(),
@@ -50,6 +56,9 @@ impl WorkspaceConfig {
         if !valid_path
             || self.keep_generations == 0
             || self.max_generation_bytes == 0
+            || self.max_generation_entries == 0
+            || self.max_generation_depth == 0
+            || self.max_generation_depth > 256
             || self
                 .excludes
                 .iter()

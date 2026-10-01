@@ -6,15 +6,28 @@ impl Cache {
         self.run.join("state").join(format!("{id}.json"))
     }
     pub(crate) fn leases(&self) -> Result<Vec<Lease>, Error> {
-        fs::read_dir(self.run.join("state"))?
-            .filter_map(|e| match e {
-                Ok(e) if e.path().extension().is_some_and(|s| s == "json") => {
-                    Some(disk::read(&e.path()))
+        let mut leases = Vec::new();
+        for entry in fs::read_dir(self.run.join("state"))? {
+            let result = (|| {
+                let entry = entry?;
+                if entry.path().extension().is_none_or(|s| s != "json") {
+                    return Ok(None);
                 }
-                Ok(_) => None,
-                Err(e) => Some(Err(e.into())),
-            })
-            .collect()
+                let lease: Lease = disk::read(&entry.path())?;
+                if entry.path() != self.lease_path(lease.id) {
+                    return Err(Error::Invalid);
+                }
+                Ok(Some(lease))
+            })();
+            match result {
+                Ok(Some(lease)) => leases.push(lease),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "skipping unreadable workspace lease");
+                }
+            }
+        }
+        Ok(leases)
     }
     /// Prepare HOME before launching a runner. None means unknown repository:
     /// use a cold private tree and never publish it under a guessed identity.
@@ -106,7 +119,7 @@ impl Cache {
                 // release must never permit GC of a still-used lower.
                 lease.detached_boot = Some(boot_id()?);
                 disk::write(&self.lease_path(id), &lease)?;
-                match Self::backend(lease.mode)?.unmount(&self.home(id)) {
+                match Self::backend(lease.mode)?.unmount(&self.paths(id, lease.lower.clone())) {
                     Ok(()) => {}
                     Err(Error::Detached) => return Err(Error::Detached),
                     Err(e) => {
@@ -117,7 +130,10 @@ impl Cache {
                 }
             }
         } else {
-            for mount in mounts::scan()?.iter().filter(|m| m.home == self.home(id)) {
+            for mount in mounts::scan()?
+                .iter()
+                .filter(|m| mounts::job_id(&self.run, &m.home) == Some(id))
+            {
                 let lease = Lease {
                     id,
                     key: None,
@@ -128,10 +144,12 @@ impl Cache {
                     execution: None,
                 };
                 disk::write(&self.lease_path(id), &lease)?;
-                Self::backend(crate::Mode::Overlay)?.unmount(&mount.home)?;
+                Self::backend(crate::Mode::Overlay)?
+                    .unmount(&self.paths(id, mount.lower.clone()))?;
             }
         }
         disk::remove(self.home(id).parent().ok_or(Error::Invalid)?)?;
+        disk::remove(&self.run.join("upper").join(id.to_string()))?;
         disk::remove(&self.lease_path(id))?;
         Ok(())
     }
@@ -145,18 +163,43 @@ impl Cache {
                 ids.insert(id);
             }
         }
-        for e in fs::read_dir(self.run.join("jobs"))? {
-            if let Some(id) = e?.file_name().to_str().and_then(|s| s.parse::<u64>().ok()) {
-                ids.insert(id);
+        for directory in ["jobs", "upper", "state"] {
+            for entry in fs::read_dir(self.run.join(directory))? {
+                match entry {
+                    Ok(entry) => {
+                        let name = entry.file_name();
+                        let id = name
+                            .to_str()
+                            .and_then(|s| s.strip_suffix(".json").unwrap_or(s).parse::<u64>().ok());
+                        if let Some(id) = id {
+                            ids.insert(id);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "skipping unreadable workspace directory entry")
+                    }
+                }
             }
         }
+        let mut failures = Vec::new();
         for id in ids.difference(retained_jobs) {
             match self.teardown(*id) {
                 Ok(()) | Err(Error::Detached) => {}
-                Err(e) => return Err(e),
+                Err(error) => {
+                    tracing::warn!(job_id = id, %error, "workspace teardown deferred; continuing reconciliation");
+                    failures.push(*id);
+                }
             }
         }
-        self.gc()
+        if let Err(error) = self.gc() {
+            tracing::warn!(%error, "workspace reconciliation garbage collection deferred");
+        }
+        failures.sort_unstable();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::Reconcile(failures))
+        }
     }
 }
 fn boot_id() -> Result<String, Error> {

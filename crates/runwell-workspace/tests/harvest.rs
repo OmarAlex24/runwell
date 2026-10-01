@@ -9,7 +9,11 @@ use support::*;
 struct Synthetic(BTreeMap<PathBuf, LayerEntry>);
 impl LayerMetadata for Synthetic {
     fn entry(&self, _: &Path, relative: &Path) -> Result<LayerEntry, Error> {
-        Ok(self.0.get(relative).cloned().unwrap_or(LayerEntry::Normal))
+        Ok(self
+            .0
+            .get(relative)
+            .cloned()
+            .unwrap_or(LayerEntry::default()))
     }
 }
 #[test]
@@ -36,10 +40,34 @@ fn whiteout_opaque_redirect_and_type_replacement_preserve_lower() {
     put(&upper.join("file-to-dir/new"), b"new");
     put(&upper.join("dir-to-file"), b"replacement");
     let markers = Synthetic(BTreeMap::from([
-        ("deleted".into(), LayerEntry::Whiteout),
-        ("opaque".into(), LayerEntry::Opaque),
-        ("moved".into(), LayerEntry::Whiteout),
-        ("renamed".into(), LayerEntry::Redirect("moved".into())),
+        (
+            "deleted".into(),
+            LayerEntry {
+                whiteout: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "opaque".into(),
+            LayerEntry {
+                opaque: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "moved".into(),
+            LayerEntry {
+                whiteout: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "renamed".into(),
+            LayerEntry {
+                redirect: Some("moved".into()),
+                ..Default::default()
+            },
+        ),
     ]));
     apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).unwrap();
     assert!(!target.join("deleted").exists());
@@ -64,7 +92,13 @@ fn opacity_at_upper_root_discards_the_whole_base() {
     put(&lower.join("old"), b"old");
     put(&target.join("old"), b"old");
     put(&upper.join("new"), b"new");
-    let markers = Synthetic(BTreeMap::from([(PathBuf::new(), LayerEntry::Opaque)]));
+    let markers = Synthetic(BTreeMap::from([(
+        PathBuf::new(),
+        LayerEntry {
+            opaque: true,
+            ..Default::default()
+        },
+    )]));
     apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).unwrap();
     assert!(!target.join("old").exists());
     assert!(target.join("new").exists());
@@ -80,13 +114,19 @@ fn redirect_cannot_escape_lower_or_promote_an_excluded_source() {
     fs::create_dir(&target).unwrap();
     let markers = Synthetic(BTreeMap::from([(
         "innocent".into(),
-        LayerEntry::Redirect(".ssh".into()),
+        LayerEntry {
+            redirect: Some(".ssh".into()),
+            ..Default::default()
+        },
     )]));
     apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).unwrap();
     assert!(!target.join("innocent/key").exists());
     let markers = Synthetic(BTreeMap::from([(
         "innocent".into(),
-        LayerEntry::Redirect("../outside".into()),
+        LayerEntry {
+            redirect: Some("../outside".into()),
+            ..Default::default()
+        },
     )]));
     assert!(apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).is_err());
 }
@@ -103,7 +143,10 @@ fn redirects_preserve_full_path_exclusion_context_at_both_ends() {
     fs::create_dir(&target).unwrap();
     let markers = Synthetic(BTreeMap::from([(
         "renamed".into(),
-        LayerEntry::Redirect(".cargo".into()),
+        LayerEntry {
+            redirect: Some(".cargo".into()),
+            ..Default::default()
+        },
     )]));
     apply_upper(
         &lower,
@@ -115,4 +158,64 @@ fn redirects_preserve_full_path_exclusion_context_at_both_ends() {
     .unwrap();
     assert!(!target.join("renamed/config.toml").exists());
     assert!(!target.join("renamed/registry/package").exists());
+}
+
+#[test]
+fn opaque_redirect_discards_destination_then_restores_origin() {
+    let temp = tempfile::tempdir().unwrap();
+    let lower = temp.path().join("lower");
+    let upper = temp.path().join("upper");
+    let target = temp.path().join("target");
+    put(&lower.join("original/cached"), b"warm");
+    put(&target.join("renamed/stale"), b"stale");
+    put(&upper.join("renamed/added"), b"new");
+    let markers = Synthetic(BTreeMap::from([(
+        "renamed".into(),
+        LayerEntry {
+            opaque: true,
+            redirect: Some("/original".into()),
+            ..Default::default()
+        },
+    )]));
+    apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).unwrap();
+    assert!(!target.join("renamed/stale").exists());
+    assert_eq!(fs::read(target.join("renamed/cached")).unwrap(), b"warm");
+    assert_eq!(fs::read(target.join("renamed/added")).unwrap(), b"new");
+}
+
+#[test]
+fn relative_redirect_uses_renamed_parents_lower_origin() {
+    let temp = tempfile::tempdir().unwrap();
+    let lower = temp.path().join("lower");
+    let upper = temp.path().join("upper");
+    let target = temp.path().join("target");
+    put(&lower.join("original/nested/old/cached"), b"right");
+    put(&lower.join("renamed/nested/old/cached"), b"wrong");
+    put(&upper.join("renamed/nested/new/added"), b"new");
+    fs::create_dir(&target).unwrap();
+    let markers = Synthetic(BTreeMap::from([
+        (
+            "renamed".into(),
+            LayerEntry {
+                redirect: Some("/original".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "renamed/nested/new".into(),
+            LayerEntry {
+                redirect: Some("old".into()),
+                ..Default::default()
+            },
+        ),
+    ]));
+    apply_upper(&lower, &upper, &target, &Excludes::new(&[]), &markers).unwrap();
+    assert_eq!(
+        fs::read(target.join("renamed/nested/new/cached")).unwrap(),
+        b"right"
+    );
+    assert_eq!(
+        fs::read(target.join("renamed/nested/new/added")).unwrap(),
+        b"new"
+    );
 }

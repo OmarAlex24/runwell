@@ -1,8 +1,7 @@
 use crate::{
-    Cache, CacheKey, Completion, Error, Generation, Lease, Mode, Promotion, disk, harvest, mounts,
+    Cache, CacheKey, Completion, Error, Generation, Lease, Mode, Promotion, disk, harvest,
 };
 use std::{
-    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -48,7 +47,12 @@ impl Cache {
         {
             return Ok(Promotion::Untrusted);
         }
-        let current = self.current(key)?;
+        let target_key = if completion.event == "pull_request" {
+            key.pull_requests()
+        } else {
+            key.clone()
+        };
+        let current = self.current(&target_key)?;
         let root = current.parent().ok_or(Error::Invalid)?;
         let record: Generation = disk::read(&current.with_extension("json"))?;
         if record.job == Some(id)
@@ -70,22 +74,21 @@ impl Cache {
         disk::directory(&stage, 0o700)?;
         let build = (|| {
             let source = if lease.mode == Mode::Overlay {
-                self.paths(id, lease.lower.clone()).upper
+                self.paths(id, lease.lower.clone()).upper.join("home")
             } else {
                 self.home(id)
             };
-            disk::eligible_size(
-                &source,
-                Path::new(""),
-                &self.excludes,
-                self.config.max_generation_bytes,
-            )?;
+            crate::budget::check(&source, &self.excludes, &self.config)?;
+            crate::budget::check(&current, &self.excludes, &self.config)?;
+            if lease.lower != current {
+                crate::budget::check(&lease.lower, &self.excludes, &self.config)?;
+            }
             disk::copy_tree(&current, &stage, &self.excludes, true)?;
             let paths = self.paths(id, lease.lower.clone());
             match lease.mode {
                 Mode::Overlay => harvest::apply_upper(
                     &lease.lower,
-                    &paths.upper,
+                    &paths.upper.join("home"),
                     &stage,
                     &self.excludes,
                     &harvest::NativeMetadata,
@@ -94,17 +97,17 @@ impl Cache {
                     crate::copy_delta::apply(&lease.lower, &paths.home, &stage, &self.excludes)?
                 }
             }
-            disk::size(&stage, self.config.max_generation_bytes)?;
+            crate::budget::check(&stage, &self.excludes, &self.config)?;
             disk::own_tree(&stage, self.owner)?;
             sync_tree(&stage)?;
             Ok::<_, Error>(())
         })();
         if let Err(error) = build {
             disk::remove(&stage)?;
-            if matches!(error, Error::SizeCap) {
+            if matches!(error, Error::SizeCap | Error::TreeCap) {
                 tracing::warn!(
                     job_id = id,
-                    "cache promotion skipped: generation exceeds size cap"
+                    %error, "cache promotion skipped: generation exceeds a resource cap"
                 );
                 return Ok(Promotion::TooLarge);
             }
@@ -121,34 +124,14 @@ impl Cache {
             },
         )?;
         switch(root, &name)?;
-        self.gc()?;
+        if let Err(error) = self.gc() {
+            tracing::warn!(%error, "cache published; garbage collection deferred");
+        }
         Ok(Promotion::Published(destination))
     }
-    /// Keep the newest N plus current and every journal/mount-table reference.
-    /// The mount scan also protects jobs whose journal write was interrupted.
-    pub fn gc(&mut self) -> Result<(), Error> {
-        let mut pinned: HashSet<_> = self.leases()?.into_iter().map(|l| l.lower).collect();
-        pinned.extend(mounts::scan()?.into_iter().map(|m| m.lower));
-        for e in fs::read_dir(&self.root)? {
-            let e = e?;
-            if !e.file_type()?.is_dir() || !e.path().join("current").exists() {
-                continue;
-            }
-            let root = e.path();
-            pinned.insert(resolve(&root)?);
-            let mut generations = generations(&root)?;
-            generations.sort_by_key(|(n, _)| std::cmp::Reverse(*n));
-            for (_, path) in generations.into_iter().skip(self.config.keep_generations) {
-                if !pinned.iter().any(|reference| reference.starts_with(&path)) {
-                    disk::remove(&path)?;
-                    disk::remove(&path.with_extension("json"))?;
-                }
-            }
-        }
-        Ok(())
-    }
 }
-fn generations(root: &Path) -> Result<Vec<(u64, PathBuf)>, Error> {
+
+pub(crate) fn generations(root: &Path) -> Result<Vec<(u64, PathBuf)>, Error> {
     let mut result = Vec::new();
     for e in fs::read_dir(root)? {
         let e = e?;
@@ -164,7 +147,7 @@ fn generations(root: &Path) -> Result<Vec<(u64, PathBuf)>, Error> {
     }
     Ok(result)
 }
-fn resolve(root: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn resolve(root: &Path) -> Result<PathBuf, Error> {
     let target = fs::read_link(root.join("current"))?;
     let name = target.to_str().ok_or(Error::Invalid)?;
     if !name

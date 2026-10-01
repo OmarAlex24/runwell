@@ -11,6 +11,7 @@ use std::{
 
 pub(super) struct Workspaces {
     cache: Arc<Mutex<Cache>>,
+    run: PathBuf,
     scope: Option<String>,
     repositories: BTreeMap<String, String>,
     per_class: bool,
@@ -44,6 +45,7 @@ impl Workspaces {
             });
         Ok(Self {
             cache: Arc::new(Mutex::new(Cache::open(config, &run, owner)?)),
+            run,
             scope,
             repositories: settings.workspace.repositories.clone(),
             per_class: settings.workspace.per_class,
@@ -86,7 +88,7 @@ impl Workspaces {
             .await
     }
     pub fn home(&self, id: u64) -> Result<PathBuf, Error> {
-        Ok(self.cache.lock().map_err(|_| Error::Io)?.home(id))
+        Ok(self.run.join("jobs").join(id.to_string()).join("home"))
     }
     pub async fn bind(
         &self,
@@ -151,5 +153,53 @@ impl Workspaces {
             Err(Error::Workspace(runwell_workspace::Error::Detached)) => Ok(()),
             result => result,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test(flavor = "current_thread")]
+    async fn home_and_tokio_heartbeat_do_not_wait_for_cache_copy_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let run = temp.path().join("run");
+        let config = runwell_config::WorkspaceConfig {
+            cache_root: Some(temp.path().join("cache")),
+            ..Default::default()
+        };
+        let owner = Owner {
+            uid: rustix::process::geteuid().as_raw(),
+            gid: rustix::process::getegid().as_raw(),
+        };
+        let workspaces = Arc::new(Workspaces {
+            cache: Arc::new(Mutex::new(Cache::copy(config, &run, owner).unwrap())),
+            run: run.clone(),
+            scope: None,
+            repositories: BTreeMap::new(),
+            per_class: false,
+            trust: None,
+        });
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let worker = workspaces.clone();
+        let copying = tokio::spawn(async move {
+            worker
+                .blocking(move |_| {
+                    ready.send(()).unwrap();
+                    // A deadline also lets the regression fail instead of hanging.
+                    let _ = blocked.recv_timeout(std::time::Duration::from_secs(3));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        });
+        started.await.unwrap();
+        let before = std::time::Instant::now();
+        assert_eq!(workspaces.home(2).unwrap(), run.join("jobs/2/home"));
+        tokio::spawn(async {}).await.unwrap();
+        let elapsed = before.elapsed();
+        let _ = release.send(());
+        copying.await.unwrap();
+        assert!(elapsed < std::time::Duration::from_secs(1));
     }
 }

@@ -67,6 +67,7 @@ impl Cache {
             locks.push(lock);
         }
         disk::directory(&run.join("state"), 0o700)?;
+        disk::directory(&run.join("upper"), 0o700)?;
         disk::directory(&run.join("jobs"), 0o711)?;
         let empty = root.join("empty");
         if !empty.exists() {
@@ -76,13 +77,6 @@ impl Cache {
             let metadata = fs::symlink_metadata(&empty)?;
             if !metadata.is_dir() {
                 return Err(Error::Invalid);
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                if metadata.uid() != owner.uid || metadata.gid() != owner.gid {
-                    return Err(Error::Invalid);
-                }
             }
         }
         let mut cache = Self {
@@ -114,12 +108,12 @@ impl Cache {
         self.run.join("jobs").join(id.to_string()).join("home")
     }
     pub(crate) fn paths(&self, id: u64, lower: PathBuf) -> WorkspacePaths {
-        let root = self.run.join("jobs").join(id.to_string());
+        let root = self.run.join("upper").join(id.to_string());
         WorkspacePaths {
             lower,
             upper: root.join("upper"),
             work: root.join("work"),
-            home: root.join("home"),
+            home: self.home(id),
         }
     }
     pub(crate) fn backend(mode: Mode) -> Result<Box<dyn Workspace>, Error> {
@@ -143,15 +137,16 @@ impl Cache {
                 home: probe.join("home"),
             };
             // Also recover a daemon killed during the previous startup probe.
-            crate::OverlayWorkspace.unmount(&paths.home)?;
+            crate::OverlayWorkspace.unmount(&paths)?;
             disk::remove(&probe)?;
             disk::directory(&probe, 0o700)?;
             match crate::OverlayWorkspace.prepare(&paths, self.owner, &self.excludes) {
                 Ok(()) => {
-                    crate::OverlayWorkspace.unmount(&paths.home)?;
+                    crate::OverlayWorkspace.unmount(&paths)?;
                     self.mode = Mode::Overlay;
                 }
                 Err(error) => {
+                    crate::OverlayWorkspace.unmount(&paths)?;
                     tracing::warn!(%error, "overlay startup probe failed; using private-copy workspaces")
                 }
             }

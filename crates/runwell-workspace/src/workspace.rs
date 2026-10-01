@@ -1,12 +1,21 @@
 use crate::{Error, Excludes, Owner, disk};
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::path::PathBuf;
+
+#[cfg(target_os = "linux")]
+impl WorkspacePaths {
+    pub(crate) fn private(&self) -> Result<&Path, Error> {
+        self.upper.parent().ok_or(Error::Invalid)
+    }
+}
 
 /// Paths derived only from a daemon-owned journal, never from job contents.
 #[derive(Debug, Clone)]
 pub struct WorkspacePaths {
     /// Fixed immutable generation, resolved before mounting.
     pub lower: PathBuf,
-    /// Private upper directory.
+    /// Root-owned overlay upper, behind a daemon-only parent; data is in `home/`.
     pub upper: PathBuf,
     /// Overlay work directory on the same filesystem as upper.
     pub work: PathBuf,
@@ -24,7 +33,7 @@ pub trait Workspace {
         excludes: &Excludes,
     ) -> Result<(), Error>;
     /// Unmount, returning Detached if lazy fallback leaves uncertain references.
-    fn unmount(&self, home: &Path) -> Result<(), Error>;
+    fn unmount(&self, paths: &WorkspacePaths) -> Result<(), Error>;
 }
 /// Plain-directory backend. Writable files cannot safely share hardlinks: Unix
 /// has no copy-on-write for hardlinks. Private byte copies preserve isolation on
@@ -40,7 +49,7 @@ impl Workspace for CopyWorkspace {
         disk::copy_tree(&paths.lower, &paths.home, excludes, false)?;
         disk::own_tree(&paths.home, owner)
     }
-    fn unmount(&self, _home: &Path) -> Result<(), Error> {
+    fn unmount(&self, _paths: &WorkspacePaths) -> Result<(), Error> {
         Ok(())
     }
 }

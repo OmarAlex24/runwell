@@ -2,6 +2,7 @@
 mod bootstrap;
 mod credentials;
 mod systemd;
+mod workspace_unit;
 mod workspaces;
 use crate::*;
 pub use bootstrap::standalone;
@@ -188,6 +189,7 @@ impl LinuxBackend {
                     arguments,
                     environment: vec![],
                     environment_files: vec![],
+                    workspace_home: None,
                 },
             )
             .await

@@ -14,6 +14,8 @@ fn cache_defaults_are_bounded_and_repository_scoped() {
     assert_eq!(workspace.promotion_interval_seconds, 21600);
     assert_eq!(workspace.max_generation_bytes, 20 * 1024 * 1024 * 1024);
     assert_eq!(workspace.keep_generations, 2);
+    assert_eq!(workspace.max_generation_entries, 1_000_000);
+    assert_eq!(workspace.max_generation_depth, 64);
 }
 #[test]
 fn rejects_invalid_or_overlapping_cache_paths_and_limits() {
@@ -24,6 +26,9 @@ fn rejects_invalid_or_overlapping_cache_paths_and_limits() {
         "cache_root = '/var/lib/runwell/runners/cache'",
         "keep_generations = 0",
         "max_generation_bytes = 0",
+        "max_generation_entries = 0",
+        "max_generation_depth = 0",
+        "max_generation_depth = 257",
         "excludes = ['../secret']",
         "unexpected = true",
     ] {

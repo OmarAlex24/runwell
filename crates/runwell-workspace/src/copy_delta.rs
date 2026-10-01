@@ -64,20 +64,19 @@ fn walk(
     Ok(())
 }
 fn same(a: &Path, b: &Path) -> Result<bool, Error> {
+    let mut a = disk::open_regular(a)?;
+    let mut b = disk::open_regular(b)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if fs::metadata(a)?.permissions().mode() & 0o111
-            != fs::metadata(b)?.permissions().mode() & 0o111
+        if a.metadata()?.permissions().mode() & 0o111 != b.metadata()?.permissions().mode() & 0o111
         {
             return Ok(false);
         }
     }
-    if fs::metadata(a)?.modified()? != fs::metadata(b)?.modified()? {
+    if a.metadata()?.modified()? != b.metadata()?.modified()? {
         return Ok(false);
     }
-    let mut a = fs::File::open(a)?;
-    let mut b = fs::File::open(b)?;
     let mut x = [0; 65536];
     let mut y = [0; 65536];
     loop {

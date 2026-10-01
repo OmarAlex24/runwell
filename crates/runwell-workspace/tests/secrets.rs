@@ -69,3 +69,58 @@ fn symlinks_and_hardlink_aliases_do_not_launder_secrets() {
     assert!(!next.join("alias").exists());
     assert!(!next.join("external").exists());
 }
+
+#[test]
+fn expanded_credentials_are_excluded_case_insensitively_at_every_depth() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut cache = cache(temp.path());
+    let home = cache.prepare(1, Some(key())).unwrap();
+    let names = [
+        ".dockercfg",
+        ".pgpass",
+        ".my.cnf",
+        ".netrc",
+        ".terraformrc",
+        ".terraform.d/credentials.tfrc.json",
+        "client.jks",
+        "client.keystore",
+        "client.p8",
+        "client.p12",
+        "client.pfx",
+        "client.kdbx",
+        "client.gpg",
+        "client.asc",
+        "client.ovpn",
+        ".oci/config",
+        ".ansible/cache",
+        ".mc/config.json",
+        ".vault-token",
+        ".npmrc",
+        ".pypirc",
+        ".gem/credentials",
+        ".config/gh/hosts.yml",
+        ".config/gcloud/config",
+        ".azure/access",
+        ".kube/config",
+    ];
+    let excludes = Excludes::new(&[]);
+    for name in names {
+        for name in [name.to_owned(), name.to_ascii_uppercase()] {
+            let path = Path::new("nested").join(name);
+            assert!(excludes.contains(&path), "{}", path.display());
+            put(&home.join(path), b"never share");
+        }
+    }
+    put(&home.join(".cache/go-build/safe"), b"warm");
+    cache.promote(1, &success(), 1).unwrap();
+    let next = cache.prepare(2, Some(key())).unwrap();
+    for name in names {
+        for name in [name.to_owned(), name.to_ascii_uppercase()] {
+            assert!(!next.join("nested").join(name).exists());
+        }
+    }
+    assert_eq!(
+        fs::read(next.join(".cache/go-build/safe")).unwrap(),
+        b"warm"
+    );
+}

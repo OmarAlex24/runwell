@@ -7,6 +7,8 @@ use std::path::PathBuf;
 pub struct CacheKey {
     pub(crate) repo: String,
     pub(crate) class: Option<String>,
+    #[serde(default)]
+    pull_request: bool,
 }
 impl CacheKey {
     /// Construct a repository key, optionally partitioned by job class.
@@ -17,7 +19,15 @@ impl CacheKey {
         Ok(Self {
             repo: repo.to_ascii_lowercase(),
             class: class.map(str::to_owned),
+            pull_request: false,
         })
+    }
+    /// Separate trust partition for opt-in PR promotions; default jobs never seed it.
+    pub fn pull_requests(&self) -> Self {
+        Self {
+            pull_request: true,
+            ..self.clone()
+        }
     }
     pub(crate) fn directory(&self) -> String {
         let mut hash = Sha256::new();
@@ -26,7 +36,11 @@ impl CacheKey {
         if let Some(class) = &self.class {
             hash.update(class.as_bytes());
         }
-        hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        let mut name: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        if self.pull_request {
+            name.push_str("-pr");
+        }
+        name
     }
 }
 /// Job account ownership, applied to private directories and promoted contents.
@@ -81,7 +95,7 @@ pub enum Promotion {
     Untrusted,
     /// A generation was promoted too recently, or this job was already harvested.
     Interval,
-    /// The complete candidate exceeded the configured size budget.
+    /// The complete candidate exceeded a byte, entry-count, or depth budget.
     TooLarge,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

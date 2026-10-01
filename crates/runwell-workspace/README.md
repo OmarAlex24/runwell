@@ -10,10 +10,11 @@ absolute cache mount points are not configured in this implementation.
 `Cache` owns generation selection, durable references, promotion and collection.
 `Workspace` separates Linux `OverlayWorkspace` from portable `CopyWorkspace`.
 One filesystem lock per cache/run root prevents concurrent managers; node
-operations run on Tokio's blocking pool. The daemon must own both roots, stop
+operations run on Tokio's blocking pool; HOME lookup computes the path without
+acquiring the cache lock. The daemon must own both roots, stop
 all runner processes and containers before harvest, and preserve live jobs
 through startup reconciliation. These are trusted-workload caches, not a
-security boundary against a privileged job or a malicious same-UID process.
+security boundary against privileged jobs or root-equivalent Docker access.
 
 ## Generations and isolation
 
@@ -24,12 +25,32 @@ resolved generation, never the symlink. The cache parent is daemon-private;
 generation contents retain the job UID and writable permission bits needed by
 overlay copy-up, but are immutable by API and inaccessible through their backing
 path to the runner. Neither ownership nor file contents of an existing lower
-are changed during publication. This requires a stable configured runner UID.
+are changed during publication. On a runner UID/GID change, private seeds are
+re-copied and re-owned; publication breaks hardlinks before changing ownership.
+
+Upper/work and all backing mounts live under `<run_dir>/upper/<id>`, behind a
+root-owned 0700 parent. Overlay upper/work roots stay root-owned. A private
+`base/home` tree hardlinks the selected immutable generation (overlayfs does not
+traverse nested lower bind mounts). This costs directory-entry I/O rather than
+copying warm file data. Those links remain daemon-private; UID changes break
+links before re-owning files. A root-owned overlay merges the base and upper,
+then only its user-owned `home` child is bound to the public
+HOME mountpoint. Thus ownership inside HOME is correct without exposing upper
+paths. The node's systemd unit masks the workspace root with a root-owned,
+read-only `TemporaryFileSystem` and uses `BindPaths` to reveal only its own HOME.
+HOME keeps its original host pathname for Docker bind-source resolution.
+`PrivateUsers=true` preserves root/runner UID mappings while separating process
+capabilities, so same-UID `/proc/<peer>/root` aliases cannot bypass the mount mask.
+Linux hosts must permit systemd to create these per-unit user namespaces.
+Systemd cannot nest binds beneath `InaccessiblePaths`; the tmpfs mask provides
+that isolation for both overlay and copy backends
+([systemd execution namespaces](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#TemporaryFileSystem=)).
 
 Linux probes an actual mount on the workspace filesystem once on startup.
 `redirect_dir=on` permits directory renames, `index=off` avoids lower file-handle
 bindings, and `metacopy=off` ensures upper files contain their data. Harvest
-consumes device/xattr whiteouts, opaque directories and redirected lower paths.
+consumes device/xattr whiteouts, independent opaque/redirect flags, and relative
+redirects resolved against each directory's original lower path.
 The semantics follow the [kernel overlayfs documentation](https://docs.kernel.org/filesystems/overlayfs.html).
 A rename is built from the job's original lower before applying its upper,
 while ordinary changes apply to the newest generation. Generation publication
@@ -46,12 +67,20 @@ concurrent completed jobs retain each other's disjoint cache additions.
 ## Promotion policy
 
 Defaults are success on a default-branch push, at most once per six hours per
-key, at most 20 GiB of logical regular-file data, and two generations retained.
+key, at most 20 GiB of logical regular-file data, 1,000,000 entries, depth 64,
+and two generations retained. Entry and depth caps also bound empty directory
+trees; input is scanned iteratively before recursive copying. The depth setting
+accepts 1–256. Final merged candidates are checked before publication.
 Failed, cancelled, unknown, fork, and wrong-repository results never promote.
 The interval survives restart in generation metadata; clock rollback delays
-promotion. A size-cap violation discards the candidate, leaves `current`
+promotion. A byte, entry-count, or depth-cap violation discards the candidate, leaves `current`
 unchanged and warns. Cache verification/build failures warn and skip harvest;
-mount teardown failures retain cleanup for retry.
+mount teardown failures retain cleanup for retry. When `allow_pull_requests=true`,
+successful same-repository PRs publish exclusively into a separate `-pr` key,
+with an independent interval and generations. Default-branch jobs never read
+that partition. Node jobs seed the default-branch generation because the actual
+workflow event is only authenticated after assignment; enabling PR promotion
+cannot feed PR changes back into the default-branch cache.
 
 The node requires the journaled JobCompleted success and queries authenticated
 GitHub REST workflow-run and repository metadata to establish the actual event,
@@ -76,6 +105,8 @@ cache_root = "/var/lib/runwell/caches"
 per_class = false
 promotion_interval_seconds = 21600
 max_generation_bytes = 21474836480
+max_generation_entries = 1000000
+max_generation_depth = 64
 keep_generations = 2
 allow_pull_requests = false
 excludes = ["company/private/*"]
@@ -91,15 +122,20 @@ Administrator globs extend mandatory case-insensitive exclusions at every depth;
 `*` and `?` match any characters. Defaults exclude `.ssh`, `.gnupg`, `.aws`,
 `.azure`, `.kube`, all of `.docker` (including `config.json`), all of `.config`,
 Git metadata/config/credentials, `.netrc`, npm/yarn/pip/bun configuration, `.env*`,
+`.dockercfg`, `.pgpass`, `.my.cnf`, Terraform configuration/credentials, `.oci`,
+`.ansible`, `.mc`, `.vault-token`, `.gem/credentials`, `.config/gh`, `.config/gcloud`,
 Cargo credentials/config, Maven settings, Gradle properties, keyrings, shell
-startup/history, private-key formats and names containing `token`, `credential`,
+startup/history, `*.jks`, `*.keystore`, `*.p8`, `*.p12`, `*.pfx`, `*.kdbx`,
+`*.gpg`, `*.asc`, `*.ovpn`, other private-key formats and names containing `token`, `credential`,
 `secret`, `password`, `auth`, or `keyring`. The authoritative complete list is
 `DEFAULT_EXCLUDES` in `src/excludes.rs`.
 
 Symlinks, devices, sockets, FIFOs, non-UTF8 names and job files with multiple
 hardlinks are omitted. This prevents aliases of an excluded credential from
 entering a generation. ACLs, capabilities and overlay xattrs are not copied.
-Tools may regenerate excluded metadata. Path filtering cannot recognize a
+Root opens job files with `O_NOFOLLOW|O_NONBLOCK`, verifies regular-file type via
+the opened descriptor, and copies from that descriptor. This rejects symlink/FIFO
+substitutions without following them or blocking. Tools may regenerate excluded metadata. Path filtering cannot recognize a
 secret deliberately copied into an innocently named regular cache file; jobs
 must never embed credentials in cache data. No file-content secret scanner is
 claimed.
@@ -113,6 +149,10 @@ all journal/mount-table references. Unknown mounts under this manager's jobs
 root are also reconciled. Orphan job directories (including partial upper/work
 trees) are removed only when not retained by the node's durable registry.
 Completed jobs with pending cleanup are retained long enough to harvest.
+GC after publication is best-effort. Damaged keys and undecodable mountinfo lines
+warn and are skipped. Corrupt leases warn and are skipped too; private lower
+wrapper references continue pinning generations even after a lazy detach. Reconciliation
+continues after individual teardown failures, then reports all failed job IDs.
 
 Unmount uses a normal unmount first. EBUSY triggers a warning and lazy detach.
 Because detached mounts disappear from mountinfo while references can survive,

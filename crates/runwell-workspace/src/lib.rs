@@ -3,10 +3,14 @@
 //! The node owns one Cache per host, stops all job writers before harvest, and
 //! passes only authenticated workflow metadata to promotion. See README.md.
 #![deny(missing_docs)]
+mod budget;
 mod cache;
 mod copy_delta;
 mod disk;
+#[cfg(test)]
+mod disk_tests;
 mod excludes;
+mod gc;
 mod generations;
 mod harvest;
 mod jobs;
@@ -38,6 +42,12 @@ pub enum Error {
     /// The candidate exceeds its logical byte budget.
     #[error("workspace generation exceeds the size cap")]
     SizeCap,
+    /// A candidate contains too many entries or an excessively deep path.
+    #[error("workspace generation exceeds the entry or depth cap")]
+    TreeCap,
+    /// Reconciliation attempted every job but could not clean these identities.
+    #[error("workspace reconciliation failed for jobs: {0:?}")]
+    Reconcile(Vec<u64>),
     /// Detached mounts may still have users. Preserve the generation and upper.
     #[error("workspace lazily detached; retained until a host reboot")]
     Detached,

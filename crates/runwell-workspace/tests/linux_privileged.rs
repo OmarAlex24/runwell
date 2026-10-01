@@ -52,10 +52,10 @@ fn overlays_isolate_promote_delete_redirect_and_have_job_ownership() {
     assert_eq!(fs::metadata(&one).unwrap().uid(), 65534);
     for name in ["upper", "work"] {
         assert_eq!(
-            fs::metadata(one.parent().unwrap().join(name))
+            fs::metadata(temp.path().join("run/upper/1").join(name))
                 .unwrap()
                 .uid(),
-            65534
+            0
         );
     }
     as_job(
@@ -76,7 +76,7 @@ fn overlays_isolate_promote_delete_redirect_and_have_job_ownership() {
         &three,
     );
     assert_eq!(fs::read(initial.join("keep")).unwrap(), b"keep\n");
-    let whiteout = three.parent().unwrap().join("upper/go/pkg/module");
+    let whiteout = temp.path().join("run/upper/3/upper/home/go/pkg/module");
     let metadata = fs::symlink_metadata(whiteout).unwrap();
     assert!(metadata.file_type().is_char_device() && metadata.rdev() == 0);
     cache.promote(3, &success(), 2).unwrap();
@@ -113,13 +113,13 @@ fn reconcile_unmounts_stale_mount_but_preserves_live_job_and_cleans_orphans() {
     let mut cache = linux_cache(temp.path());
     let stale = cache.prepare(1, Some(key())).unwrap();
     let live = cache.prepare(2, Some(key())).unwrap();
-    fs::create_dir_all(temp.path().join("run/jobs/99/upper")).unwrap();
+    fs::create_dir_all(temp.path().join("run/upper/99/upper")).unwrap();
     drop(cache);
     let mut cache = linux_cache(temp.path());
     cache.reconcile(&HashSet::from([2])).unwrap();
     assert!(!stale.exists());
     assert!(live.exists());
-    assert!(!temp.path().join("run/jobs/99").exists());
+    assert!(!temp.path().join("run/upper/99").exists());
     as_job("echo alive > \"$1/alive\"", &live);
     cache.teardown(2).unwrap();
 }
@@ -142,7 +142,183 @@ fn lazy_unmount_keeps_generation_pinned_across_restart() {
     let mut cache = linux_cache(temp.path());
     cache.reconcile(&HashSet::new()).unwrap();
     assert!(lower.exists());
-    assert!(home.parent().unwrap().join("upper").exists());
+    assert!(temp.path().join("run/upper/1/upper").exists());
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[test]
+#[ignore = "requires Linux root, overlayfs, unshare, mount and setpriv"]
+fn job_namespace_cannot_open_other_jobs_upper_or_home() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut cache = linux_cache(temp.path());
+    let one = cache.prepare(1, Some(key())).unwrap();
+    let two = cache.prepare(2, Some(key())).unwrap();
+    as_job("echo private > \"$1/private\"", &one);
+    let upper = temp.path().join("run/upper/1/upper/home/private");
+    as_job("test ! -r \"$1\" && test ! -w \"$1\"", &upper);
+    let mut peer = Command::new("/bin/sleep")
+        .arg("30")
+        .uid(65534)
+        .gid(65534)
+        .spawn()
+        .unwrap();
+    let peer_home = format!("/proc/{}/root{}", peer.id(), one.display());
+    as_job("test -r \"$1/private\"", Path::new(&peer_home));
+    let exposed = temp.path().join("runner-home");
+    fs::create_dir(&exposed).unwrap();
+    // Match systemd TemporaryFileSystem + BindPaths: hide the entire workspace
+    // root and reveal only this job's HOME at the same host-visible pathname.
+    let script = r#"
+set -eu
+mount --make-rprivate /
+mount --bind "$1" "$2"
+mount -t tmpfs -o mode=0711,nodev,nosuid tmpfs "$3"
+mkdir -p "$1"
+mount --bind "$2" "$1"
+umount "$2"
+mount -o remount,ro "$3"
+exec setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs /bin/sh -c '
+    set -eu
+    test "$(stat -c %u "$1")" = 65534
+    echo own > "$1/own"
+    ! cat "$2/private"
+    ! cat "$3"
+    ! cat "$4/private"
+    ! sh -c '\''echo poison > "$1"'\'' probe "$3"
+' probe "$1" "$4" "$5" "$6"
+"#;
+    assert!(
+        Command::new("unshare")
+            .args([
+                "--user",
+                "--map-users=0:0:65535",
+                "--map-groups=0:0:65535",
+                "--mount",
+                "/bin/sh",
+                "-c",
+                script,
+                "probe"
+            ])
+            .arg(&two)
+            .arg(&exposed)
+            .arg(temp.path().join("run"))
+            .arg(&one)
+            .arg(&upper)
+            .arg(peer_home)
+            .status()
+            .unwrap()
+            .success()
+    );
+    peer.kill().unwrap();
+    peer.wait().unwrap();
+    assert!(!one.join("own").exists());
+    assert_eq!(fs::read(two.join("own")).unwrap(), b"own\n");
+    assert_eq!(fs::read(&upper).unwrap(), b"private\n");
+    cache.teardown(1).unwrap();
+    cache.teardown(2).unwrap();
+}
+
+#[test]
+#[ignore = "requires Linux root and overlayfs"]
+fn runner_uid_change_recopies_seed_links_without_chowning_old_generations() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut cache = linux_cache(temp.path());
+    let home = cache.prepare(1, Some(key())).unwrap();
+    as_job("echo warm > \"$1/cached\"", &home);
+    cache.promote(1, &success(), 1).unwrap();
+    let old = cache.current(&key()).unwrap();
+    let original_inode = fs::metadata(old.join("cached")).unwrap().ino();
+    cache.teardown(1).unwrap();
+    drop(cache);
+    let mut cache = Cache::open(
+        settings(temp.path()),
+        &temp.path().join("run"),
+        Owner {
+            uid: 65533,
+            gid: 65533,
+        },
+    )
+    .unwrap();
+    let home = cache.prepare(2, Some(key())).unwrap();
+    assert!(
+        Command::new("/bin/sh")
+            .args([
+                "-c",
+                "test -r \"$1/cached\" && echo new > \"$1/new\"",
+                "probe"
+            ])
+            .arg(home)
+            .uid(65533)
+            .gid(65533)
+            .status()
+            .unwrap()
+            .success()
+    );
+    cache.promote(2, &success(), 2).unwrap();
+    let current = cache.current(&key()).unwrap();
+    assert_eq!(fs::metadata(current.join("cached")).unwrap().uid(), 65533);
+    assert_eq!(fs::metadata(old.join("cached")).unwrap().uid(), 65534);
+    assert_eq!(
+        fs::metadata(old.join("cached")).unwrap().ino(),
+        original_inode
+    );
+    assert_ne!(
+        fs::metadata(current.join("cached")).unwrap().ino(),
+        original_inode
+    );
+    cache.teardown(2).unwrap();
+    drop(cache);
+    // Copy fallback leaves unchanged files hardlink-seeded in the candidate;
+    // own_tree must re-copy them before applying yet another runner UID.
+    let mut cache = Cache::copy(
+        settings(temp.path()),
+        &temp.path().join("run"),
+        Owner {
+            uid: 65532,
+            gid: 65532,
+        },
+    )
+    .unwrap();
+    cache.prepare(3, Some(key())).unwrap();
+    cache.promote(3, &success(), 3).unwrap();
+    assert_eq!(
+        fs::metadata(cache.current(&key()).unwrap().join("cached"))
+            .unwrap()
+            .uid(),
+        65532
+    );
+    assert_eq!(fs::metadata(current.join("cached")).unwrap().uid(), 65533);
+    cache.teardown(3).unwrap();
+}
+
+#[test]
+#[ignore = "requires Linux root and overlayfs"]
+fn corrupt_lease_still_pins_lazy_detached_lower_via_private_reference() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut cache = linux_cache(temp.path());
+    let home = cache.prepare(1, Some(key())).unwrap();
+    let lower = cache.current(&key()).unwrap();
+    let mut child = Command::new("/bin/sleep")
+        .arg("30")
+        .current_dir(&home)
+        .spawn()
+        .unwrap();
+    assert!(matches!(
+        cache.teardown(1),
+        Err(runwell_workspace::Error::Detached)
+    ));
+    fs::write(temp.path().join("run/state/1.json"), b"corrupt").unwrap();
+    for id in 2..=4 {
+        cache.prepare(id, Some(key())).unwrap();
+        cache.promote(id, &success(), id).unwrap();
+        cache.teardown(id).unwrap();
+    }
+    cache.gc().unwrap();
+    assert!(
+        lower.exists(),
+        "the private base marker must pin a detached lower even without a readable lease"
+    );
     child.kill().unwrap();
     child.wait().unwrap();
 }

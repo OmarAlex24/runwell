@@ -5,16 +5,14 @@ use std::{
 };
 
 /// Overlay operations, abstracted so portable tests need no device nodes/xattrs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LayerEntry {
-    /// Ordinary file or merging directory.
-    Normal,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LayerEntry {
     /// Remove the corresponding lower name.
-    Whiteout,
-    /// Replace a lower directory instead of merging it.
-    Opaque,
-    /// Renamed lower directory, relative to the immutable lower root.
-    Redirect(PathBuf),
+    pub whiteout: bool,
+    /// Discard the existing destination before applying a redirect or children.
+    pub opaque: bool,
+    /// Absolute from the lower root, or relative to the lower-origin parent.
+    pub redirect: Option<PathBuf>,
 }
 /// Interpret overlay metadata; test implementations can use synthetic markers.
 pub trait LayerMetadata {
@@ -31,14 +29,24 @@ pub fn apply_upper(
     excludes: &Excludes,
     metadata: &dyn LayerMetadata,
 ) -> Result<(), Error> {
-    apply(lower, upper, candidate, Path::new(""), excludes, metadata)?;
+    apply(
+        lower,
+        upper,
+        candidate,
+        Path::new(""),
+        Path::new(""),
+        excludes,
+        metadata,
+    )?;
     disk::prune(candidate, Path::new(""), excludes)
 }
+#[allow(clippy::too_many_arguments)]
 fn apply(
     lower: &Path,
     upper: &Path,
     target: &Path,
     relative: &Path,
+    origin: &Path,
     excludes: &Excludes,
     metadata: &dyn LayerMetadata,
 ) -> Result<(), Error> {
@@ -47,28 +55,41 @@ fn apply(
         return Ok(());
     }
     let m = fs::symlink_metadata(upper)?;
-    match metadata.entry(upper, relative)? {
-        LayerEntry::Whiteout => return disk::remove(target),
-        LayerEntry::Opaque => disk::remove(target)?,
-        LayerEntry::Redirect(origin) => {
-            if !m.is_dir()
-                || !origin
-                    .components()
-                    .all(|c| matches!(c, Component::Normal(_)))
-            {
+    let entry = metadata.entry(upper, relative)?;
+    if entry.whiteout {
+        return disk::remove(target);
+    }
+    if entry.opaque {
+        disk::remove(target)?;
+    }
+    let mut origin = origin.to_owned();
+    if let Some(redirect) = entry.redirect {
+        // A child of a renamed parent resolves relative to its original lower
+        // parent, not its new name in the upper tree. Opacity is independent.
+        origin = if redirect.is_absolute() {
+            redirect
+                .strip_prefix("/")
+                .map_err(|_| Error::Invalid)?
+                .to_owned()
+        } else {
+            origin.parent().unwrap_or(Path::new("")).join(redirect)
+        };
+        if !m.is_dir()
+            || !origin
+                .components()
+                .all(|c| matches!(c, Component::Normal(_)))
+        {
+            return Err(Error::Invalid);
+        }
+        disk::remove(target)?;
+        disk::directory(target, 0o700)?;
+        if !excludes.contains(&origin) {
+            let source = lower.canonicalize()?.join(&origin);
+            if source.canonicalize()? != source || !fs::symlink_metadata(&source)?.is_dir() {
                 return Err(Error::Invalid);
             }
-            disk::remove(target)?;
-            disk::directory(target, 0o700)?;
-            if !excludes.contains(&origin) {
-                let source = lower.canonicalize()?.join(&origin);
-                if source.canonicalize()? != source || !fs::symlink_metadata(&source)?.is_dir() {
-                    return Err(Error::Invalid);
-                }
-                disk::copy_at(&source, target, &origin, excludes, true)?;
-            }
+            disk::copy_at(&source, target, &origin, excludes, true)?;
         }
-        LayerEntry::Normal => {}
     }
     if m.is_dir() {
         if fs::symlink_metadata(target).is_ok_and(|m| !m.is_dir()) {
@@ -82,6 +103,7 @@ fn apply(
                 &e.path(),
                 &target.join(e.file_name()),
                 &relative.join(e.file_name()),
+                &origin.join(e.file_name()),
                 excludes,
                 metadata,
             )?;
@@ -108,6 +130,8 @@ pub(crate) fn multiple_links(metadata: &fs::Metadata) -> bool {
     }
 }
 
+// The root-owned overlay wrapper contains only a user-owned `home`. Kernel
+// absolute redirects include that wrapper component; never allow escape from it.
 pub(crate) struct NativeMetadata;
 impl LayerMetadata for NativeMetadata {
     fn entry(&self, path: &Path, _relative: &Path) -> Result<LayerEntry, Error> {
@@ -118,29 +142,39 @@ impl LayerMetadata for NativeMetadata {
             if (m.file_type().is_char_device() && m.rdev() == 0)
                 || (m.is_file() && m.len() == 0 && attribute(path, "whiteout")?.is_some())
             {
-                return Ok(LayerEntry::Whiteout);
+                return Ok(LayerEntry {
+                    whiteout: true,
+                    ..Default::default()
+                });
             }
             if attribute(path, "metacopy")?.is_some() {
                 return Err(Error::Invalid);
             }
-            if attribute(path, "opaque")?.as_deref() == Some(b"y") {
-                return Ok(LayerEntry::Opaque);
-            }
-            if let Some(origin) = attribute(path, "redirect")? {
-                let origin = String::from_utf8(origin).map_err(|_| Error::Invalid)?;
-                // Kernel absolute redirects are relative to the overlay root;
-                // relative redirects name an entry relative to this parent.
-                let origin = if let Some(rooted) = origin.strip_prefix('/') {
-                    PathBuf::from(rooted)
-                } else {
-                    _relative.parent().unwrap_or(Path::new("")).join(origin)
-                };
-                return Ok(LayerEntry::Redirect(origin));
-            }
+            let opaque = attribute(path, "opaque")?.as_deref() == Some(b"y");
+            let redirect = attribute(path, "redirect")?
+                .map(|origin| -> Result<PathBuf, Error> {
+                    let origin = String::from_utf8(origin).map_err(|_| Error::Invalid)?;
+                    if origin.starts_with('/') {
+                        let rest = Path::new(&origin)
+                            .strip_prefix("/home")
+                            .map_err(|_| Error::Invalid)?;
+                        Ok(Path::new("/").join(rest))
+                    } else {
+                        Ok(PathBuf::from(origin))
+                    }
+                })
+                .transpose()?;
+            Ok(LayerEntry {
+                opaque,
+                redirect,
+                whiteout: false,
+            })
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = path;
-        Ok(LayerEntry::Normal)
+        {
+            let _ = path;
+            Ok(LayerEntry::default())
+        }
     }
 }
 #[cfg(target_os = "linux")]

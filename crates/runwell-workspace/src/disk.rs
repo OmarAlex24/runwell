@@ -24,7 +24,8 @@ pub(crate) fn own(path: &Path, owner: Owner) -> Result<(), Error> {
         let m = fs::symlink_metadata(path)?;
         if m.uid() != owner.uid || m.gid() != owner.gid {
             if m.is_file() && m.nlink() > 1 {
-                return Err(Error::Invalid);
+                // Break immutable-generation links before changing ownership.
+                copy_file(path, path)?;
             }
             std::os::unix::fs::chown(path, Some(owner.uid), Some(owner.gid))?;
         }
@@ -95,19 +96,43 @@ pub(crate) fn copy_at(
     }
     Ok(())
 }
+/// Never follow a swapped symlink or block on a swapped FIFO. Inspect the opened
+/// descriptor, not a second lookup of the pathname, before reading job bytes.
+pub(crate) fn open_regular(path: &Path) -> Result<fs::File, Error> {
+    #[cfg(unix)]
+    let file = fs::File::from(
+        rustix::fs::open(
+            path,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?,
+    );
+    #[cfg(not(unix))]
+    let file = fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Error::Invalid);
+    }
+    Ok(file)
+}
 pub(crate) fn copy_file(source: &Path, target: &Path) -> Result<(), Error> {
-    // Callers remove the destination first; fs::copy must never truncate a
-    // hardlink belonging to an older mounted generation.
+    let mut source = open_regular(source)?;
+    let metadata = source.metadata()?;
+    // Open first: source == target is used to break links on a UID change.
     remove(target)?;
-    std::io::copy(&mut fs::File::open(source)?, &mut fs::File::create(target)?)?;
-    fs::File::options()
+    let mut destination = fs::OpenOptions::new()
         .write(true)
-        .open(target)?
-        .set_times(fs::FileTimes::new().set_modified(fs::metadata(source)?.modified()?))?;
+        .create_new(true)
+        .open(target)?;
+    std::io::copy(&mut source, &mut destination)?;
+    destination.set_times(fs::FileTimes::new().set_modified(metadata.modified()?))?;
     #[cfg(unix)]
     permissions(
         target,
-        if fs::metadata(source)?.permissions().mode() & 0o111 != 0 {
+        if metadata.permissions().mode() & 0o111 != 0 {
             0o700
         } else {
             0o600
@@ -127,25 +152,6 @@ pub(crate) fn own_tree(path: &Path, owner: Owner) -> Result<(), Error> {
     }
     Ok(())
 }
-pub(crate) fn size(path: &Path, cap: u64) -> Result<u64, Error> {
-    let m = fs::symlink_metadata(path)?;
-    let mut bytes = if m.is_file() { m.len() } else { 0 };
-    if m.is_dir() {
-        for e in fs::read_dir(path)? {
-            bytes = bytes
-                .checked_add(size(&e?.path(), cap)?)
-                .ok_or(Error::SizeCap)?;
-            if bytes > cap {
-                return Err(Error::SizeCap);
-            }
-        }
-    }
-    if bytes > cap {
-        return Err(Error::SizeCap);
-    }
-    Ok(bytes)
-}
-
 pub(crate) fn prune(path: &Path, relative: &Path, excludes: &Excludes) -> Result<(), Error> {
     if excludes.contains(relative) {
         return remove(path);
@@ -157,43 +163,4 @@ pub(crate) fn prune(path: &Path, relative: &Path, excludes: &Excludes) -> Result
         }
     }
     Ok(())
-}
-
-// Reject oversized job input before copying bytes; the final merged size is
-// checked separately because it also includes unchanged and redirected lowers.
-pub(crate) fn eligible_size(
-    path: &Path,
-    relative: &Path,
-    excludes: &Excludes,
-    cap: u64,
-) -> Result<u64, Error> {
-    if excludes.contains(relative) {
-        return Ok(0);
-    }
-    let m = fs::symlink_metadata(path)?;
-    let mut size = if m.is_file() && !crate::harvest::multiple_links(&m) {
-        m.len()
-    } else {
-        0
-    };
-    if m.is_dir() {
-        for e in fs::read_dir(path)? {
-            let e = e?;
-            size = size
-                .checked_add(eligible_size(
-                    &e.path(),
-                    &relative.join(e.file_name()),
-                    excludes,
-                    cap,
-                )?)
-                .ok_or(Error::SizeCap)?;
-            if size > cap {
-                return Err(Error::SizeCap);
-            }
-        }
-    }
-    if size > cap {
-        return Err(Error::SizeCap);
-    }
-    Ok(size)
 }
