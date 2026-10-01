@@ -23,6 +23,12 @@ pub struct FakeState {
     pub template_version: Option<String>,
     /// Ordered host operations for safety assertions.
     pub operations: Vec<String>,
+    /// Jobs whose simulated Docker cleanup fails until removed from this set.
+    pub cleanup_failures: std::collections::BTreeSet<u64>,
+    /// Inject a workspace reconciliation failure.
+    pub workspace_reconcile_failure: bool,
+    /// Last identities protected from workspace reconciliation.
+    pub retained_workspaces: std::collections::HashSet<u64>,
 }
 /// Cloneable backend surviving controller reconstruction in restart tests.
 #[derive(Clone, Default)]
@@ -64,6 +70,31 @@ impl NodeBackend for FakeBackend {
                 .push(format!("prepare:{}", plan.slice.job_id));
             state.plans.insert(plan.slice.job_id, plan.clone());
             Ok(())
+        })
+    }
+    fn harvest_workspace<'a>(&'a self, job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(async move {
+            self.state
+                .lock()
+                .await
+                .operations
+                .push(format!("harvest:{}", job.id));
+            Ok(())
+        })
+    }
+    fn reconcile_workspaces<'a>(
+        &'a self,
+        retained: &'a std::collections::HashSet<u64>,
+    ) -> NodeFuture<'a, ()> {
+        Box::pin(async move {
+            let mut state = self.state.lock().await;
+            state.operations.push("reconcile_workspaces".into());
+            state.retained_workspaces.clone_from(retained);
+            if state.workspace_reconcile_failure {
+                Err(Error::Io)
+            } else {
+                Ok(())
+            }
         })
     }
     fn start<'a>(&'a self, plan: &'a JobPlan, launch: &'a LaunchSpec) -> NodeFuture<'a, ()> {
@@ -116,6 +147,9 @@ impl NodeBackend for FakeBackend {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             state.operations.push(format!("stop:{id}"));
+            if state.cleanup_failures.contains(&id) {
+                return Err(Error::Io);
+            }
             state.processes.insert(id, ProcessState::Exited(None));
             Ok(())
         })
@@ -136,6 +170,9 @@ impl NodeBackend for FakeBackend {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             state.operations.push(format!("cleanup:{id}"));
+            if state.cleanup_failures.contains(&id) {
+                return Err(Error::Io);
+            }
             state.plans.remove(&id);
             state.processes.remove(&id);
             Ok(())

@@ -23,6 +23,9 @@ impl Workspaces {
         owner: Owner,
         github: Option<&GithubConfig>,
     ) -> Result<Self, Error> {
+        settings
+            .validate_runtime_paths()
+            .map_err(|_| Error::Config)?;
         let parent = settings.runners_dir.parent().ok_or(Error::Config)?;
         let mut config = settings.workspace.clone();
         if config.cache_root.is_none() {

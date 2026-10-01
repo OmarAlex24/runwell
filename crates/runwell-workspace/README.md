@@ -149,6 +149,14 @@ all journal/mount-table references. Unknown mounts under this manager's jobs
 root are also reconciled. Orphan job directories (including partial upper/work
 trees) are removed only when not retained by the node's durable registry.
 Completed jobs with pending cleanup are retained long enough to harvest.
+Proxy cleanup failures do not skip reconciliation of unrelated workspaces; the
+failed job remains retained. Workspace failures likewise do not skip other
+orphan proxy cleanups.
+
+The Docker proxy runtime root must be disjoint from workspaces, caches, runner
+installations and templates. Configuration validation rejects overlaps, keeping
+`<proxy_run_dir>/jobs/<id>/docker.sock` outside the workspace mount mask. The
+default `/run/runwell` remains traversable (0711); JIT files stay root-only (0600).
 GC after publication is best-effort. Damaged keys and undecodable mountinfo lines
 warn and are skipped. Corrupt leases warn and are skipped too; private lower
 wrapper references continue pinning generations even after a lazy detach. Reconciliation

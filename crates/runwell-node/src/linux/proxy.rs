@@ -46,10 +46,17 @@ impl LinuxBackend {
         }
         // Docker availability must never gate stopping local units or deleting
         // credentials/installations. Reconcile keeps the proxy runtime identity.
-        let steps: [crate::NodeFuture<'_, ()>; 4] = [
-            Box::pin(async { self.systemd.stop(&crate::slice_unit(id)).await }),
+        let slice = self.systemd.stop(&crate::slice_unit(id)).await;
+        let quiescent = result.is_ok() && slice.is_ok();
+        let steps: [crate::NodeFuture<'_, ()>; 3] = [
             Box::pin(async { super::credentials::remove(id) }),
-            Box::pin(self.workspaces.teardown(id)),
+            // Retain upper and mount leases until every writer is gone.
+            Box::pin(async {
+                if quiescent {
+                    self.workspaces.teardown(id).await?;
+                }
+                Ok(())
+            }),
             Box::pin(async {
                 runwell_runner::remove_install(
                     &self.settings.runners_dir,
@@ -58,6 +65,6 @@ impl LinuxBackend {
                 Ok(())
             }),
         ];
-        crate::teardown::finish(result, steps).await
+        crate::teardown::finish(result.and(slice), steps).await
     }
 }

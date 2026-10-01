@@ -69,6 +69,7 @@ impl StandaloneConfig {
     pub(super) fn validate(&self, config: &Config) -> Result<(), Error> {
         self.docker_proxy.validate()?;
         self.workspace.validate()?;
+        self.validate_runtime_paths()?;
         if let Some(root) = &self.workspace.cache_root
             && (root.starts_with(&self.runners_dir)
                 || self.runners_dir.starts_with(root)
@@ -195,4 +196,30 @@ impl StandaloneConfig {
 
 fn idle_seconds() -> u64 {
     180
+}
+
+impl StandaloneConfig {
+    /// Keep proxy sockets outside masked or job-writable workspace trees.
+    pub fn validate_runtime_paths(&self) -> Result<(), Error> {
+        let parent = self
+            .runners_dir
+            .parent()
+            .ok_or_else(|| Error::Validation("runner directory must have a parent".into()))?;
+        let workspace = parent.join("workspaces");
+        let cache = self
+            .workspace
+            .cache_root
+            .clone()
+            .unwrap_or_else(|| parent.join("caches"));
+        for root in [&workspace, &cache, &self.runners_dir, &self.templates_dir] {
+            if self.docker_proxy.run_dir.starts_with(root)
+                || root.starts_with(&self.docker_proxy.run_dir)
+            {
+                return Err(Error::Validation(
+                    "Docker proxy runtime must not overlap workspaces, caches, runners or templates".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
 }

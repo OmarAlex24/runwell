@@ -250,7 +250,7 @@ async fn jit_environment_is_private_and_home_is_per_job() {
             .permissions()
             .mode()
             & 0o777,
-        0o700
+        0o711
     );
     backend.cleanup(id).await.unwrap();
     assert!(!std::path::Path::new(&credential).exists());

@@ -3,6 +3,8 @@ mod bootstrap;
 mod credentials;
 mod proxy;
 mod systemd;
+#[cfg(test)]
+mod workspace_socket_tests;
 mod workspace_unit;
 mod workspaces;
 use crate::*;
@@ -284,9 +286,9 @@ impl NodeBackend for LinuxBackend {
     }
     fn harvest_workspace<'a>(&'a self, job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
         Box::pin(async move {
-            // Stop all descendants before reading cache files. Docker cleanup
-            // must also have completed before invoking this lifecycle hook.
-            self.systemd.stop(&service_unit(job.id as u64)).await?;
+            // Containers can bind HOME. Require proxy drain and removal here too,
+            // so even a direct harvest call cannot read a live container's upper.
+            self.teardown_job(job.id as u64, true).await?;
             self.systemd.stop(&slice_unit(job.id as u64)).await?;
             self.workspaces.harvest(job).await;
             Ok(())

@@ -78,6 +78,26 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
         template_version: "unused".into(),
     };
     backend.recover(&plan).await.unwrap();
+    let store = runwell_store::Store::open(":memory:").await.unwrap();
+    let job_id = store
+        .queue(runwell_store::NewJob {
+            scale_set_id: 42,
+            request_id: 1,
+            github_job_id: "probe".into(),
+            workflow_run_id: 1,
+            repo: "example/repo".into(),
+            name: "probe".into(),
+            class: "probe".into(),
+            reserved_cpu: 1,
+            reserved_memory: slice.memory_high,
+        })
+        .await
+        .unwrap();
+    let mut job = store.job(job_id).await.unwrap();
+    job.id = id as i64;
+    backend.prepare_workspace(&job).await.unwrap();
+    let home = dir.path().join(format!("workspaces/jobs/{id}/home"));
+    assert!(home.is_dir());
     // Exercise the real service environment and filesystem permissions as the
     // unprivileged runner. In particular /run/runwell also holds JIT files.
     std::fs::create_dir_all(plan.directory.join("bin")).unwrap();
@@ -90,8 +110,8 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
     }
     let executable = plan.directory.join("bin/Runner.Listener");
     std::fs::write(&executable, format!(
-        "#!/bin/sh\ntest \"$DOCKER_HOST\" = \"unix://{}\" || exit 21\ntest \"$TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE\" = \"{}\" || exit 22\nexec docker version --format '{{{{.Server.Version}}}}'\n",
-        socket.display(), socket.display()
+        "#!/bin/sh\ntest \"$DOCKER_HOST\" = \"unix://{}\" || exit 21\ntest \"$TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE\" = \"{}\" || exit 22\ntest \"$HOME\" = \"{}\" || exit 23\necho own > \"$HOME/own\" || exit 24\nexec docker version --format '{{{{.Server.Version}}}}'\n",
+        socket.display(), socket.display(), home.display()
     )).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
     backend
@@ -167,10 +187,12 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
             "/var/run/docker.sock:/var/run/docker.sock",
             "-v",
             "/anonymous",
+            "-v",
+            &format!("{}:/job-home", home.display()),
             "busybox:1.37",
             "sh",
             "-c",
-            "dd if=/dev/zero of=/dev/null bs=1M count=128; sleep 600",
+            "dd if=/dev/zero of=/dev/null bs=1M count=128; while true; do echo container > /job-home/container; sleep 0.1; done",
         ],
         None,
     )
@@ -279,8 +301,11 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
         .await,
         "true"
     );
+    backend.harvest_workspace(&job).await.unwrap();
+    assert!(home.exists());
     backend.cleanup(id).await.unwrap();
     backend.cleanup(id).await.unwrap();
+    assert!(!home.exists());
     // Remove only the explicitly created test controls and output image.
     success(&upstream, &["rm", "-f", &control], None).await;
     success(&upstream, &["image", "rm", "-f", &image], None).await;

@@ -44,3 +44,22 @@ fn accepts_additive_rules_and_class_routing() {
     let workspace = config.standalone.unwrap().workspace;
     assert_eq!(workspace.repositories["runwell-small"], "owner/repo");
 }
+
+#[test]
+fn proxy_sockets_cannot_overlap_workspace_masks_or_cleanup_roots() {
+    for root in [
+        "/var/lib/runwell/workspaces",
+        "/var/lib/runwell/workspaces/proxy",
+        "/var/lib/runwell",
+        "/var/lib/runwell/caches/proxy",
+        "/var/lib/runwell/runners/proxy",
+        "/var/lib/runwell/templates/proxy",
+    ] {
+        assert!(
+            config(&format!("[standalone.docker_proxy]\nrun_dir = '{root}'")).is_err(),
+            "{root}"
+        );
+    }
+    assert!(config("[standalone.docker_proxy]\nrun_dir = '/run/runwell'\n[standalone.workspace]\ncache_root = '/run/runwell/cache'").is_err());
+    assert!(config("[standalone.docker_proxy]\nrun_dir = '/run/runwell'").is_ok());
+}

@@ -12,6 +12,10 @@ use std::{
 };
 use support::*;
 
+// Child creation can briefly inherit another test's cache lock before exec.
+// Serialize host probes so a concurrent spawn cannot delay a cache reopen.
+static HOST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn linux_cache(temp: &Path) -> Cache {
     assert!(rustix::process::geteuid().is_root());
     fs::set_permissions(temp, fs::Permissions::from_mode(0o711)).unwrap();
@@ -45,6 +49,7 @@ fn as_job(script: &str, home: &Path) {
 #[test]
 #[ignore = "requires Linux root with CAP_SYS_ADMIN and overlayfs"]
 fn overlays_isolate_promote_delete_redirect_and_have_job_ownership() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let one = cache.prepare(1, Some(key())).unwrap();
@@ -109,6 +114,7 @@ fn overlays_isolate_promote_delete_redirect_and_have_job_ownership() {
 #[test]
 #[ignore = "requires Linux root with CAP_SYS_ADMIN and overlayfs"]
 fn reconcile_unmounts_stale_mount_but_preserves_live_job_and_cleans_orphans() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let stale = cache.prepare(1, Some(key())).unwrap();
@@ -127,6 +133,7 @@ fn reconcile_unmounts_stale_mount_but_preserves_live_job_and_cleans_orphans() {
 #[test]
 #[ignore = "requires Linux root with CAP_SYS_ADMIN and overlayfs"]
 fn lazy_unmount_keeps_generation_pinned_across_restart() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let home = cache.prepare(1, Some(key())).unwrap();
@@ -150,6 +157,7 @@ fn lazy_unmount_keeps_generation_pinned_across_restart() {
 #[test]
 #[ignore = "requires Linux root, overlayfs, unshare, mount and setpriv"]
 fn job_namespace_cannot_open_other_jobs_upper_or_home() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let one = cache.prepare(1, Some(key())).unwrap();
@@ -222,6 +230,7 @@ exec setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs /bin/sh -
 #[test]
 #[ignore = "requires Linux root and overlayfs"]
 fn runner_uid_change_recopies_seed_links_without_chowning_old_generations() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let home = cache.prepare(1, Some(key())).unwrap();
@@ -295,6 +304,7 @@ fn runner_uid_change_recopies_seed_links_without_chowning_old_generations() {
 #[test]
 #[ignore = "requires Linux root and overlayfs"]
 fn corrupt_lease_still_pins_lazy_detached_lower_via_private_reference() {
+    let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let mut cache = linux_cache(temp.path());
     let home = cache.prepare(1, Some(key())).unwrap();

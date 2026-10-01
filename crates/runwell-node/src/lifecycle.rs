@@ -30,48 +30,63 @@ impl Controller {
             .filter(|r| !r.cleaned)
             .map(|r| r.job_id as u64)
             .collect();
+        let mut retained = known.clone();
+        let mut result = Ok(());
         for local in self.backend.inventory().await? {
             if !known.contains(&local.id) {
-                let name = format!("{}{}", self.prefix, local.id);
-                if let Some(remote) = self.api.lookup(&name).await? {
-                    if remote.name != name
-                        || !self.classes.contains_key(&remote.runner_scale_set_id)
-                    {
-                        return Err(Error::OrphanBusy);
-                    }
-                    if !self.api.delete(remote.id).await? {
-                        return Err(Error::OrphanBusy);
-                    }
+                let cleaned = self.reconcile_orphan(local.id).await;
+                if let Err(error) = &cleaned {
+                    // Failed DELETE or teardown cannot authorize unmounting a
+                    // potentially live job, but unrelated orphans can proceed.
+                    retained.insert(local.id);
+                    tracing::warn!(job_id = local.id, %error, "orphan cleanup deferred");
                 }
-                self.backend.cleanup(local.id).await?;
+                result = result.and(cleaned);
             }
         }
         for runner in runners.iter().filter(|r| !r.cleaned) {
-            let job = self.store.job(runner.job_id).await?;
-            self.validate_identity(runner)?;
-            let state = self.backend.inspect(job.id as u64).await?;
-            if state == ProcessState::Running {
-                self.backend.recover(&self.plan(&job, runner)?).await?;
-                if job.state == State::RunnerCreated {
-                    self.store.transition(job.id, State::Running).await?;
-                } else if job.state != State::Running {
-                    return Err(Error::OrphanBusy);
-                }
-            } else if job.state == State::Admitted {
-                // A JIT POST may have succeeded before its response was journaled.
-                // Delete that registration by durable name; credentials are not
-                // persisted, so it cannot be safely launched after a restart.
-                if self.api.lookup(&runner.name).await?.is_some() {
-                    self.store.transition(job.id, State::Orphaned).await?;
-                    self.finish(&job, runner, state).await?;
-                }
-            } else {
-                self.monitor(&job, runner).await?;
+            let recovered = self.reconcile_runner(runner).await;
+            if let Err(error) = &recovered {
+                tracing::warn!(job_id = runner.job_id, %error, "runner recovery deferred");
             }
+            result = result.and(recovered);
         }
-        // Unknown busy registrations above must preserve their mounts as well
-        // as their services. Reconcile orphans only after DELETE-first recovery.
-        self.backend.reconcile_workspaces(&known).await?;
+        let workspaces = self.backend.reconcile_workspaces(&retained).await;
+        result.and(workspaces)
+    }
+    async fn reconcile_orphan(&self, id: u64) -> Result<(), Error> {
+        let name = format!("{}{}", self.prefix, id);
+        if let Some(remote) = self.api.lookup(&name).await?
+            && (remote.name != name
+                || !self.classes.contains_key(&remote.runner_scale_set_id)
+                || !self.api.delete(remote.id).await?)
+        {
+            return Err(Error::OrphanBusy);
+        }
+        self.backend.cleanup(id).await
+    }
+    async fn reconcile_runner(&mut self, runner: &Runner) -> Result<(), Error> {
+        let job = self.store.job(runner.job_id).await?;
+        self.validate_identity(runner)?;
+        let state = self.backend.inspect(job.id as u64).await?;
+        if state == ProcessState::Running {
+            self.backend.recover(&self.plan(&job, runner)?).await?;
+            if job.state == State::RunnerCreated {
+                self.store.transition(job.id, State::Running).await?;
+            } else if job.state != State::Running {
+                return Err(Error::OrphanBusy);
+            }
+        } else if job.state == State::Admitted {
+            // A JIT POST may have succeeded before its response was journaled.
+            // Delete that registration by durable name; credentials are not
+            // persisted, so it cannot be safely launched after a restart.
+            if self.api.lookup(&runner.name).await?.is_some() {
+                self.store.transition(job.id, State::Orphaned).await?;
+                self.finish(&job, runner, state).await?;
+            }
+        } else {
+            self.monitor(&job, runner).await?;
+        }
         Ok(())
     }
     /// Reconsider queued demand, sample exits, and retry retained cleanup work.

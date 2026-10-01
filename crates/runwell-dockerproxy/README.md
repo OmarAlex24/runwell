@@ -97,6 +97,9 @@ fails; both passes follow cancellation of proxy requests.
 Docker cleanup runs in `stop_runner`, before `measure`, retaining the slice until M3 journals its
 final counters. If Docker cleanup fails, the node still stops the slice and removes
 credentials and the installation, then returns the Docker error for reconcile.
+The overlay HOME and its lease remain intact until Docker removal and local unit
+shutdown succeed. Harvest checks this ordering itself before reading the upper;
+failed removal never permits promotion.
 The proxy's runtime directory remains as the retry identity. Final counters may
 be unavailable after this failure path has removed the slice.
 `linux_dockerproxy::docker_cli_attribution_exec_socket_build_and_label_scoped_teardown`
