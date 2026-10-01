@@ -155,7 +155,7 @@ fn lazy_unmount_keeps_generation_pinned_across_restart() {
 }
 
 #[test]
-#[ignore = "requires Linux root, overlayfs, unshare, mount and setpriv"]
+#[ignore = "requires Linux root, overlayfs and systemd PID 1"]
 fn job_namespace_cannot_open_other_jobs_upper_or_home() {
     let _host = HOST.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -173,53 +173,76 @@ fn job_namespace_cannot_open_other_jobs_upper_or_home() {
         .unwrap();
     let peer_home = format!("/proc/{}/root{}", peer.id(), one.display());
     as_job("test -r \"$1/private\"", Path::new(&peer_home));
-    let exposed = temp.path().join("runner-home");
-    fs::create_dir(&exposed).unwrap();
-    // Match systemd TemporaryFileSystem + BindPaths: hide the entire workspace
-    // root and reveal only this job's HOME at the same host-visible pathname.
+    // Exercise systemd's namespace setup without depending on unshare's
+    // distribution-specific newuidmap/subuid behavior.
+    let unit = format!("runwell-workspace-probe-{}.service", std::process::id());
     let script = r#"
 set -eu
-mount --make-rprivate /
-mount --bind "$1" "$2"
-mount -t tmpfs -o mode=0711,nodev,nosuid tmpfs "$3"
-mkdir -p "$1"
-mount --bind "$2" "$1"
-umount "$2"
-mount -o remount,ro "$3"
-exec setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs /bin/sh -c '
-    set -eu
-    test "$(stat -c %u "$1")" = 65534
-    echo own > "$1/own"
-    ! cat "$2/private"
-    ! cat "$3"
-    ! cat "$4/private"
-    ! sh -c '\''echo poison > "$1"'\'' probe "$3"
-' probe "$1" "$4" "$5" "$6"
+test "$(stat -c %u "$1")" = 65534
+echo own > "$1/own"
+for path in "$2/private" "$3" "$4/private"; do
+    if cat "$path"; then
+        echo "peer path is readable: $path" >&2
+        exit 1
+    fi
+    if sh -c 'echo poison > "$1"' probe "$path"; then
+        echo "peer path is writable: $path" >&2
+        exit 1
+    fi
+done
 "#;
-    assert!(
-        Command::new("unshare")
-            .args([
-                "--user",
-                "--map-users=0:0:65535",
-                "--map-groups=0:0:65535",
-                "--mount",
-                "/bin/sh",
-                "-c",
-                script,
-                "probe"
-            ])
-            .arg(&two)
-            .arg(&exposed)
-            .arg(temp.path().join("run"))
-            .arg(&one)
-            .arg(&upper)
-            .arg(peer_home)
-            .status()
-            .unwrap()
-            .success()
-    );
+    let output = Command::new("systemd-run")
+        .args(["--wait", "--pipe", "--service-type=exec", "--unit", &unit])
+        .args([
+            "-p",
+            "User=nobody",
+            "-p",
+            "PrivateUsers=true",
+            "-p",
+            "NoNewPrivileges=true",
+            "-p",
+            "RuntimeMaxSec=30s",
+        ])
+        .arg(format!(
+            "--property=TemporaryFileSystem={}:ro,mode=0711,nodev,nosuid",
+            temp.path().join("run").display()
+        ))
+        .arg(format!("--property=BindPaths={}", two.display()))
+        .args(["/bin/sh", "-c", script, "probe"])
+        .arg(&two)
+        .arg(&one)
+        .arg(&upper)
+        .arg(peer_home)
+        .output()
+        .unwrap();
     peer.kill().unwrap();
     peer.wait().unwrap();
+    if !output.status.success() {
+        let properties = Command::new("systemctl")
+            .args(["show", "--no-pager", &unit])
+            .output()
+            .unwrap();
+        let journal = Command::new("journalctl")
+            .args(["--no-pager", "--boot", "-n", "80", "--unit", &unit])
+            .output()
+            .unwrap();
+        let _ = Command::new("systemctl").args(["stop", &unit]).output();
+        let _ = Command::new("systemctl")
+            .args(["reset-failed", &unit])
+            .output();
+        cache.teardown(1).unwrap();
+        cache.teardown(2).unwrap();
+        panic!(
+            "workspace child exited with {}\nstdout:\n{}\nstderr:\n{}\nunit properties:\n{}\n{}\njournal:\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&properties.stdout),
+            String::from_utf8_lossy(&properties.stderr),
+            String::from_utf8_lossy(&journal.stdout),
+            String::from_utf8_lossy(&journal.stderr),
+        );
+    }
     assert!(!one.join("own").exists());
     assert_eq!(fs::read(two.join("own")).unwrap(), b"own\n");
     assert_eq!(fs::read(&upper).unwrap(), b"private\n");

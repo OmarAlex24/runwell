@@ -151,6 +151,12 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
         0o600
     );
     let before = backend.measure(id).await.unwrap();
+    // The runner's Docker CLI can peak above a small container. Allocate and
+    // retain more than that baseline so memory attribution is observable.
+    let memory_mib = before.memory_peak.div_ceil(1024 * 1024) + 32;
+    let workload = format!(
+        "set -eu; dd if=/dev/zero of=/dev/shm/attributed bs=1M count={memory_mib}; touch /dev/shm/ready; while true; do echo container > /job-home/container; sleep 0.1; done"
+    );
     let network = format!("rw-m4a-net-{id}");
     let volume = format!("rw-m4a-vol-{id}");
     let name = format!("rw-m4a-job-{id}");
@@ -181,6 +187,8 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
             &name,
             "--network",
             &network,
+            "--shm-size",
+            &format!("{}m", memory_mib + 1),
             "-v",
             &format!("{volume}:/data"),
             "-v",
@@ -192,7 +200,19 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
             "busybox:1.37",
             "sh",
             "-c",
-            "dd if=/dev/zero of=/dev/null bs=1M count=128; while true; do echo container > /job-home/container; sleep 0.1; done",
+            &workload,
+        ],
+        None,
+    )
+    .await;
+    success(
+        &socket,
+        &[
+            "exec",
+            &container,
+            "sh",
+            "-c",
+            "until test -f /dev/shm/ready; do sleep 0.1; done",
         ],
         None,
     )
@@ -281,7 +301,12 @@ async fn docker_cli_attribution_exec_socket_build_and_label_scoped_teardown() {
     backend.stop_runner(id).await.unwrap(); // cleanup precedes final slice counters
     let sample = backend.measure(id).await.unwrap();
     assert!(sample.cpu_usec > before.cpu_usec);
-    assert!(sample.memory_peak > before.memory_peak);
+    assert!(
+        sample.memory_peak > before.memory_peak,
+        "container memory peak {} did not exceed runner baseline {}",
+        sample.memory_peak,
+        before.memory_peak
+    );
     assert!(!socket.exists());
     for args in [
         vec!["inspect", container.as_str()],

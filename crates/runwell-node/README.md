@@ -133,10 +133,16 @@ units, cgroup counters, memory OOM enforcement, orphan reconciliation, and root
 requirements. CI's `linux-privileged` job runs:
 
 ```sh
-sudo -E env "PATH=$PATH" cargo test -p runwell-node -- --ignored
+sudo -E env "PATH=$PATH" cargo test -p runwell-node -p runwell-workspace -p runwell-dockerproxy --no-fail-fast -- --ignored
 ```
 
 These tests require systemd PID 1, root, cgroup v2 with PSI, and `/usr/bin/python3`.
+The workspace/socket probe uses the production systemd launcher and reports
+child stdout/stderr, unit properties and journal entries on failure. Namespace
+tests require real systemd, even in containers; `unshare --map-users` is not an
+equivalent substitute and can require subordinate-ID grants even for root.
+The Docker integration test also requires a daemon with the systemd cgroup driver
+and the Buildx CLI plugin.
 They do not download the runner or require live GitHub credentials. A real
 GitHub workflow is still required to validate the full upstream JIT execution
 and release archive layout on the deployment host.
