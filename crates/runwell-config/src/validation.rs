@@ -10,6 +10,7 @@ impl Config {
 
     /// Reject invalid reservations, ambiguous classes, paths, and PSI thresholds.
     pub fn validate(&self) -> Result<(), Error> {
+        self.controller.production.validate()?;
         if let Some(network) = &self.network {
             network.validate()?;
             require(self.transport.is_some(), "network mode requires mTLS files")?;

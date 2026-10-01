@@ -140,3 +140,12 @@ both a CA-signed unauthorized peer and a foreign CA.
 A real two-host run is still required for systemd persistence across daemon
 upgrades, proxy reconnect effects, real Docker restarts, overlay cleanup under
 ENOSPC/OOM, firewall partitions and actual GitHub session/runner reconciliation.
+
+## Production scheduling and monitoring
+
+The network controller enables production scheduling and learned durations.
+Configure `[controller.production]` for repository weights, aging, the loopback
+metrics listener, automatic retry and optional alert webhook. Retry is off by
+default; enabling it requires GitHub Actions write permission and a nonzero daily
+cap. See [the integration contract](m5-integration.md) for identity matching,
+conservative retry vetoes, metadata fallbacks and the two-host validation scope.

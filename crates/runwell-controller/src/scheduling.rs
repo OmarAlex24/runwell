@@ -28,6 +28,9 @@ impl Fleet {
             .collect())
     }
     pub(crate) async fn select(&self, jobs: &[Job]) -> Result<Vec<i64>, Error> {
+        if self.production.is_some() {
+            return self.production_select(jobs).await;
+        }
         let existing = self.store.placements().await?;
         let mut chosen: Vec<_> = jobs
             .iter()

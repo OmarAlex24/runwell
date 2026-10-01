@@ -3,7 +3,9 @@
 mod install;
 mod release;
 pub use install::{clone_install, remove_install};
-pub use release::{Release, ReleaseClient, ReleaseStatus, checksum, release_status};
+pub use release::{
+    Release, ReleaseClient, ReleaseStatus, checksum, release_deadline, release_status,
+};
 #[cfg(target_os = "linux")]
 mod template;
 use secrecy::SecretString;

@@ -58,6 +58,20 @@ pub fn release_status(
     releases: &[Release],
     now: jiff::Timestamp,
 ) -> Result<ReleaseStatus, Error> {
+    let oldest = oldest_newer(current, releases)?;
+    let days = oldest.map_or(0, |t| (now.as_second() - t.as_second()).max(0) / 86400);
+    Ok(match days {
+        0..=20 => ReleaseStatus::Current,
+        21..=24 => ReleaseStatus::Warn,
+        25..=29 => ReleaseStatus::Refresh,
+        _ => ReleaseStatus::Expired,
+    })
+}
+/// Enforced expiry seconds, measured from the oldest newer stable release.
+pub fn release_deadline(current: &str, releases: &[Release]) -> Result<Option<i64>, Error> {
+    Ok(oldest_newer(current, releases)?.map(|at| at.as_second().saturating_add(30 * 86400)))
+}
+fn oldest_newer(current: &str, releases: &[Release]) -> Result<Option<jiff::Timestamp>, Error> {
     let current = version_parts(current)?;
     let mut oldest = None;
     for release in releases.iter().filter(|r| !r.draft && !r.prerelease) {
@@ -67,13 +81,7 @@ pub fn release_status(
             }));
         }
     }
-    let days = oldest.map_or(0, |t| (now.as_second() - t.as_second()).max(0) / 86400);
-    Ok(match days {
-        0..=20 => ReleaseStatus::Current,
-        21..=24 => ReleaseStatus::Warn,
-        25..=29 => ReleaseStatus::Refresh,
-        _ => ReleaseStatus::Expired,
-    })
+    Ok(oldest)
 }
 /// Require either a pinned digest or a checksum associated with this exact asset.
 /// Both GitHub's Markdown table and sha256sum formats are supported; ambiguity

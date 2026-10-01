@@ -72,6 +72,8 @@ impl Fleet {
                     })
                 })
                 .or(placement.execution_started_at);
+            let watchdog_ms =
+                self.watchdog_seconds(&job).await? * f64::from(settings.watchdog_multiple) * 1000.0;
             let reason = if now.saturating_sub(last_seen) >= settings.lost_seconds as i64 * 1000 {
                 Some("node_lost")
             } else if executing
@@ -81,13 +83,9 @@ impl Fleet {
             {
                 Some("heartbeat_missing")
             } else if executing
-                && placement.execution_started_at.is_some_and(|at| {
-                    now.saturating_sub(at)
-                        > settings
-                            .expected_seconds
-                            .saturating_mul(u64::from(settings.watchdog_multiple))
-                            .saturating_mul(1000) as i64
-                })
+                && placement
+                    .execution_started_at
+                    .is_some_and(|at| now.saturating_sub(at) as f64 > watchdog_ms)
             {
                 Some("duration_watchdog")
             } else if placement.execution_started_at.is_none()

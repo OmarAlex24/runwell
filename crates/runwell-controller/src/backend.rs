@@ -135,7 +135,7 @@ impl NodeBackend for Fleet {
                     })
                     .await?;
             }
-            self.hooks.completed(job, sample);
+            self.hooks.completed(job, sample).await?;
             Ok(())
         })
     }

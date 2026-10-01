@@ -88,3 +88,10 @@ M5b review fixes reuse the existing workspace-pinned `sha2` for in-flight RPC
 fingerprints and `rustix` for bounded, no-follow runner heartbeat reads. Tokio's
 existing pinned version enables `test-util` only for deterministic drain tests.
 No dependency version or new external package was added for these fixes.
+
+## M5 integration metrics listener
+
+The controller now uses the workspace-pinned `axum = 0.8.9` for the independent
+HTTP `/metrics` listener. Routing and graceful shutdown reuse the existing Tokio
+and Hyper stack; node RPC remains the M5b mTLS transport. No dependency version
+was loosened. The resolved Axum dependencies are checked by cargo-deny.

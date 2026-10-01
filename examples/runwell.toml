@@ -98,3 +98,14 @@ class = "general"
 id = "node-2"
 address = "node-2.internal:9444"
 class = "general"
+
+# The metrics listener is independent of the authenticated node RPC listener.
+[controller.production]
+metrics_listen = "127.0.0.1:9090"
+retry_enabled = false
+retry_daily_cap = 100
+aging_seconds = 300
+tick_seconds = 5
+github_api_base = "https://api.github.com/"
+# alert_webhook = "https://alerts.example.net/runwell"
+# repository_weights = { "example/project" = 2, "example/secondary" = 1 }

@@ -9,10 +9,18 @@ use std::{collections::BTreeMap, sync::Arc};
 pub trait Hooks: Send + Sync {
     /// Classify/retry hook; reason is evidence, never a workflow result inferred from exit zero.
     fn failure<'a>(&'a self, event: &'a FailureEvent) -> NodeFuture<'a, ()>;
+    /// Authoritative node admission, with bounded class labels.
+    fn admission(&self, _class: &str, _accepted: bool) {}
     /// Metrics hook; labels should remain bounded to configured nodes and classes.
     fn report(&self, _report: &Report) {}
     /// M5a duration-learning/terminal-metrics hook. Deduplicate by durable job ID.
-    fn completed(&self, _job: &runwell_store::Job, _sample: &runwell_store::JobMeasurement) {}
+    fn completed<'a>(
+        &'a self,
+        _job: &'a runwell_store::Job,
+        _sample: &'a runwell_store::JobMeasurement,
+    ) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 /// Default hook records evidence; M5a supplies classification, retries and metrics.
 pub struct LogHooks;
@@ -26,6 +34,7 @@ impl Hooks for LogHooks {
 }
 /// Multi-host NodeBackend. All placement decisions flow through SchedulingPolicy.
 pub struct Fleet {
+    pub(crate) production: Option<runwell_scheduler::ProductionConfig>,
     pub(crate) releases: Option<tokio::sync::Mutex<runwell_runner::ReleaseClient>>,
     pub(crate) store: Store,
     pub(crate) peers: BTreeMap<String, Arc<dyn Rpc>>,
@@ -60,6 +69,7 @@ impl Fleet {
             return Err(Error::Config);
         }
         Ok(Self {
+            production: None,
             releases: None,
             config,
             store,

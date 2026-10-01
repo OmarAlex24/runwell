@@ -12,6 +12,7 @@ mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod linux;
 mod runtime;
+mod scheduling;
 #[cfg(any(target_os = "linux", test))]
 mod teardown;
 #[cfg(any(target_os = "linux", test))]

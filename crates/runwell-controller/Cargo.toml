@@ -8,6 +8,10 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+axum.workspace = true
+runwell-metrics = { version = "=0.1.0", path = "../runwell-metrics" }
+runwell-retry = { version = "=0.1.0", path = "../runwell-retry" }
+runwell-github = { version = "=0.1.0", path = "../runwell-github" }
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true
@@ -26,4 +30,6 @@ runwell-scaleset = { version = "=0.1.0", path = "../runwell-scaleset" }
 runwell-workspace = { version = "=0.1.0", path = "../runwell-workspace" }
 
 [dev-dependencies]
+reqwest.workspace = true
+wiremock.workspace = true
 tempfile.workspace = true

@@ -177,7 +177,7 @@ impl Controller {
             return Err(Error::Github);
         }
         let class = self.classes.get(&set).ok_or(Error::Config)?;
-        Ok(self
+        let id = self
             .store
             .queue(NewJob {
                 scale_set_id: set,
@@ -190,7 +190,9 @@ impl Controller {
                 reserved_cpu: class.cpu_slots,
                 reserved_memory: class.memory_high_bytes,
             })
-            .await?)
+            .await?;
+        self.scheduling_metadata(id, job, false).await?;
+        Ok(id)
     }
     async fn bind(
         &self,
@@ -231,6 +233,8 @@ impl Controller {
                 repository: execution.repo.clone(),
             };
             self.store.bind(job.id, execution, outcome).await?;
+            self.scheduling_metadata(job.id, event, job.metadata.request_id != request)
+                .await?;
             if evidence.workflow_run_id > 0
                 && runwell_config::valid_repository(&evidence.repository)
                 && !runner.cleaned

@@ -1,5 +1,5 @@
 //! Controller-only GitHub credential and session setup.
-use crate::{Controller, Fleet, GithubGateway, LogHooks};
+use crate::{Controller, Fleet, GithubGateway, Telemetry};
 use runwell_config::{AuthConfig, Config};
 use runwell_node::{Drain, Error};
 use runwell_scaleset::{ActionsClient, Credentials, Label, RunnerSetting, ScaleSet, Secret};
@@ -74,14 +74,36 @@ pub async fn controller(config: Config) -> Result<(), Error> {
         peers.insert(peer.id.clone(), client.clone());
         clients.push(client);
     }
+    let rest = Arc::new(
+        runwell_github::RestClient::from_config(
+            config
+                .controller
+                .production
+                .github_api_base
+                .parse()
+                .map_err(|_| Error::Config)?,
+            &config.github.auth,
+        )
+        .await
+        .map_err(|_| Error::Github)?,
+    );
+    let telemetry = Arc::new(Telemetry::new(
+        config.clone(),
+        store.clone(),
+        Arc::new(WallClock),
+        rest.clone(),
+        rest,
+    )?);
+    let production = runwell_scheduler::ProductionConfig {
+        aging_seconds: config.controller.production.aging_seconds as f64,
+        repository_weights: config.controller.production.repository_weights.clone(),
+        ..Default::default()
+    };
     let policy = Arc::new(runwell_scheduler::Runwell {
         priority: runwell_scheduler::Priority::Fifo,
         aging_seconds: 300.0,
-        admission: runwell_admission::ReservationAdmission::new(
-            settings.overcommit.cpu,
-            settings.overcommit.memory,
-        )
-        .map_err(|_| Error::Config)?,
+        admission: runwell_admission::ReservationAdmission::new(1.0, 1.0)
+            .map_err(|_| Error::Config)?,
     });
     let fleet = Arc::new(
         Fleet::new(
@@ -91,17 +113,28 @@ pub async fn controller(config: Config) -> Result<(), Error> {
             gateway.clone(),
             policy,
             Arc::new(WallClock),
-            Arc::new(LogHooks),
+            telemetry.clone(),
         )?
+        .with_production_policy(production)
         .with_release_updates()?,
     );
     let listener = tokio::net::TcpListener::bind(network.controller_listen).await?;
+    let metrics_listener =
+        tokio::net::TcpListener::bind(config.controller.production.metrics_listen).await?;
     let allowed = network
         .nodes
         .iter()
         .map(|n| Identity::node(&n.id))
         .collect();
     let stop = CancellationToken::new();
+    let monitor = crate::monitoring::start(telemetry.clone(), stop.clone())?;
+    let metrics_stop = stop.clone();
+    let metrics = telemetry.metrics();
+    let scrape = tokio::spawn(crate::monitoring::serve_metrics(
+        metrics_listener,
+        metrics,
+        metrics_stop,
+    ));
     let streams = crate::streams::subscribe(fleet.clone(), clients, stop.clone());
     let server_stop = stop.clone();
     let handler = fleet.clone();
@@ -128,6 +161,8 @@ pub async fn controller(config: Config) -> Result<(), Error> {
     signals.abort();
     stop.cancel();
     let _ = server.await;
+    let _ = scrape.await;
+    let _ = monitor.await;
     for task in streams {
         let _ = task.await;
     }

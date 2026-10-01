@@ -6,6 +6,7 @@ pub(crate) struct Command {
     pub reply: oneshot::Sender<Result<i64, Error>>,
 }
 pub(crate) enum Mutation {
+    Policy(crate::policy::PolicyMutation),
     Completion(crate::CompletedJob),
     RetryClaim(crate::RetryClaim),
     RetryFinish(String, i64, u32, crate::RetryStatus),
@@ -31,6 +32,7 @@ pub(crate) async fn run(mut connection: PoolConnection<Sqlite>, mut rx: mpsc::Re
 }
 async fn apply(c: &mut PoolConnection<Sqlite>, mutation: Mutation) -> Result<i64, Error> {
     let changed = match mutation {
+        Mutation::Policy(m) => return crate::policy_writer::apply(c, m).await,
         Mutation::Completion(job) => return crate::history::record(c, job).await,
         Mutation::RetryClaim(claim) => return crate::retries::claim(c, claim).await,
         Mutation::RetryFinish(repo, run, attempt, status) => return crate::retries::finish(c, &repo, run, attempt, status).await,

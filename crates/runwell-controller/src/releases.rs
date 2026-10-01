@@ -20,6 +20,15 @@ impl Fleet {
         let (mut version, checked) = saved.unwrap_or_else(|| (configured.clone(), 0));
         if force || now.saturating_sub(checked) >= 86_400_000 {
             let releases = client.releases().await?;
+            let mut versions = std::collections::BTreeSet::from([version.clone()]);
+            for (_, _, report) in self.reports().await? {
+                versions.insert(report.template_version);
+            }
+            for v in versions {
+                if let Some(expiry) = runwell_runner::release_deadline(&v, &releases)? {
+                    self.store.set_template_expiry(v, expiry).await?;
+                }
+            }
             let status = release_status(
                 &version,
                 &releases,

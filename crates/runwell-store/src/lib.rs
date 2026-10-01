@@ -3,6 +3,9 @@
 //! redelivery safe. No API accepts JIT credentials or authentication material.
 #![deny(missing_docs)]
 mod history;
+mod policy;
+mod policy_writer;
+pub use policy::{Observation, SchedulingContext};
 mod model;
 mod network;
 mod network_writer;

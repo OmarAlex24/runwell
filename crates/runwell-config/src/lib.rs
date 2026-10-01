@@ -10,7 +10,9 @@ use std::{collections::HashSet, path::PathBuf};
 
 mod dockerproxy;
 mod network;
+mod production;
 pub use network::{NetworkConfig, PeerNode, valid_identity};
+pub use production::ProductionConfig;
 mod standalone;
 mod validation;
 mod workspace;
@@ -42,6 +44,9 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerConfig {
+    /// Production scheduling, retry, metrics and alert settings.
+    #[serde(default)]
+    pub production: ProductionConfig,
     /// Durable SQLite database path.
     pub database: PathBuf,
     /// Nonempty list of resource classes, each owning one scale-set session.
