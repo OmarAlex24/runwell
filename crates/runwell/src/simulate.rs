@@ -26,7 +26,7 @@ pub struct Simulate {
     /// TOML hosts, resource demands and baseline assumptions.
     #[arg(long)]
     hosts: PathBuf,
-    /// all, baseline, runwell-equivalent, fifo, shortest, critical-path, fair-share, or runwell.
+    /// all, baseline, runwell-equivalent, fifo, shortest, critical-path, fair-share, production, or runwell.
     #[arg(long, default_value = "all")]
     policy: String,
     #[arg(long, value_enum, default_value = "md")]

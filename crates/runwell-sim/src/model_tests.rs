@@ -61,7 +61,10 @@ fn sweep_has_all_factors_and_equivalent_is_not_resource_scaled() {
         ..Config::default()
     };
     let report = crate::simulate(&[job(1, "a", 0, 0, 10, &[])], &config, &Policy::ALL).unwrap();
-    assert_eq!(report.rows.len(), 26);
+    assert_eq!(
+        report.rows.len(),
+        2 + (Policy::ALL.len() - 2) * crate::experiments::OVERCOMMIT_SWEEP.len()
+    );
     assert_eq!(
         report
             .rows

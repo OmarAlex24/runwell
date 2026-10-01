@@ -38,6 +38,7 @@ impl Engine<'_> {
                 self.slots[h] -= 1;
             }
         }
+        self.learn_completion(i);
         self.finished += 1;
         for &c in &self.children[i] {
             if self.timings[c].done {

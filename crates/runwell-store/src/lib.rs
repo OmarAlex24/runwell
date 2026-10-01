@@ -2,10 +2,14 @@
 //! Write-ahead runner identities and durable cleanup markers make restart and
 //! redelivery safe. No API accepts JIT credentials or authentication material.
 #![deny(missing_docs)]
+mod history;
 mod model;
 mod read;
+mod retries;
 mod writer;
+pub use history::CompletedJob;
 pub use model::*;
+pub use retries::{RetryClaim, RetryRecord, RetryStatus};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::{str::FromStr, time::Duration};
 use tokio::sync::{mpsc, oneshot};

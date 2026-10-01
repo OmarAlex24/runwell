@@ -1,0 +1,72 @@
+# Test/code rules always take precedence over every infrastructure signal.
+[[rule]]
+id = "test-or-lint"
+class = "test_code"
+patterns = ["test failed", "tests failed", "test failure", "assertionerror", "assertion failed", "test result: failed", "lint failed", "linting failed", "error ts", "compilation failed", "failed to compile", "pytest failed"]
+# Match failure records/counts, never a command invocation or a zero-failure count.
+# Regexes are compiled once, case-insensitive and multiline.
+regexes = [
+    # pytest, unittest, Go, Rust, Jest/Vitest, Mocha, TAP and JUnit summaries.
+    '^\s*(?:failed|error)\s+\S+\.py(?:::\S+)?(?:\s+-|$)',
+    '^\s*(?:fail|error):\s+\S+\s+\(.+\)',
+    '^\s*--- fail:\s+',
+    '^\s*test \S+ \.\.\. failed\s*$',
+    '^\s*fail\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?\b',
+    '^\s*(?:test suites|test files|tests):?\s+[1-9][0-9]* failed\b',
+    '^=+[^\n]*\b[1-9][0-9]* failed\b[^\n]*=+\s*$',
+    '^\s*[1-9][0-9]* failed(?:, [0-9]+ [a-z]+)* in [0-9.]+s\b',
+    '^\s*[1-9][0-9]* failing\b',
+    '^\s*not ok [0-9]+\b',
+    '\btests run:\s*[0-9]+,[^\n]*\b(?:failures|errors):\s*[1-9][0-9]*\b',
+    '^\s*failures:\s*$',
+    # ESLint diagnostics and Clippy error context, not tool names by themselves.
+    '\beslint (?:found|reported) [1-9][0-9]* errors?\b',
+    '^\s*[0-9]+:[0-9]+\s+error\s+\S+',
+    '^\s*✖\s+[0-9]+\s+problems?\s+\([1-9][0-9]* errors?\b',
+    '^error(?:\[[^]\n]+\])?:[^\n]+\n(?:[^\n]*\n){0,12}[^\n]*(?:clippy::|rust-clippy)',
+    '\b(?:clippy|eslint) (?:check )?failed\b',
+]
+signals = ["code_failure"]
+
+[[rule]]
+id = "oom"
+class = "infra"
+signals = ["oom_kill"]
+
+[[rule]]
+id = "runner-crash"
+class = "infra"
+signals = ["runner_crash", "runner_lost", "node_lost"]
+patterns = ["the runner has received a shutdown signal", "lost communication with the server", "the runner has lost communication"]
+
+[[rule]]
+id = "docker-daemon"
+class = "infra"
+signals = ["docker_daemon_error"]
+patterns = ["cannot connect to the docker daemon", "error during connect: this error may indicate that the docker daemon is not running"]
+
+[[rule]]
+id = "pressure-timeout"
+class = "infra"
+signals = ["timeout_above_psi_brake"]
+
+[[rule]]
+id = "never-picked-up"
+class = "infra"
+signals = ["never_picked_up"]
+
+[[rule]]
+id = "disk-full"
+class = "infra"
+patterns = ["no space left on device"]
+
+[[rule]]
+id = "registry-network"
+class = "infra"
+patterns = ["net/http: tls handshake timeout", "net/http: request canceled while waiting for connection", "failed to pull image: i/o timeout", "registry connection timed out"]
+
+# These may be application/test exceptions; they do not establish infra alone.
+[[rule]]
+id = "ambiguous-application-error"
+class = "unknown"
+patterns = ["network is unreachable", "temporary failure in name resolution", "dial tcp: i/o timeout", "traceback (most recent call last):"]

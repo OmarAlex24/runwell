@@ -3,11 +3,20 @@ use super::*;
 impl Engine<'_> {
     pub(super) fn candidate(&self, i: usize) -> PendingJob {
         let j = &self.trace.jobs[i];
+        // The event loop consumes arrivals through now + EPS. Normalize only
+        // that tolerance here so a consumed wakeup stays eligible for a strict
+        // production clock, while the recorded readiness remains unchanged.
+        let ready = self.timings[i].ready;
+        let ready_at = if ready <= self.now + EPS {
+            ready.min(self.now)
+        } else {
+            ready
+        };
         PendingJob {
             request_id: i,
             pool: j.pool,
             host_class: j.demand.host_class.clone(),
-            ready_at: self.timings[i].ready,
+            ready_at,
             expected_seconds: j.work,
             critical_path_seconds: j.path,
             fair_service: self.service[j.repo],
@@ -23,8 +32,7 @@ impl Engine<'_> {
             .filter(|(_, j)| j.local && j.work > 0.0)
         {
             if self
-                .selector
-                .select(&[self.candidate(i)], &self.nodes, 0.0)
+                .choose(&[self.candidate(i)], &self.nodes, 0.0)?
                 .is_none()
             {
                 return Err(Error::Invalid(format!(
@@ -49,9 +57,12 @@ impl Engine<'_> {
                 .map(|&i| self.candidate(i))
                 .collect();
             let online = runwell_scheduler::online_nodes(&self.nodes, &self.host_offline);
-            let Some(p) = self.selector.select(&candidates, &online, self.now) else {
+            let Some((p, fairness)) = self.choose(&candidates, &online, self.now)? else {
                 break;
             };
+            if let Some(fairness) = fairness {
+                self.fair_state = fairness;
+            }
             let (i, h) = (p.request_id, p.node_id);
             self.ready.retain(|&j| j != i);
             if let Some(group) = self.trace.jobs[i].matrix_group {
