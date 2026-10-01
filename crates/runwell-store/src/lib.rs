@@ -4,6 +4,12 @@
 #![deny(missing_docs)]
 mod history;
 mod model;
+mod network;
+mod network_writer;
+mod spool;
+mod spool_writer;
+pub use network::{FailureEvent, NodeLease, Placement};
+pub use spool::LeaseRecord;
 mod read;
 mod retries;
 mod writer;
@@ -145,3 +151,6 @@ impl From<sqlx::Error> for Error {
         Self::Database
     }
 }
+
+#[cfg(test)]
+mod spool_tests;

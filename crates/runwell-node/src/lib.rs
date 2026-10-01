@@ -96,3 +96,6 @@ impl From<runwell_scaleset::Error> for Error {
         }
     }
 }
+
+#[cfg(any(target_os = "linux", test))]
+mod heartbeat;

@@ -9,6 +9,8 @@ use serde::Deserialize;
 use std::{collections::HashSet, path::PathBuf};
 
 mod dockerproxy;
+mod network;
+pub use network::{NetworkConfig, PeerNode, valid_identity};
 mod standalone;
 mod validation;
 mod workspace;
@@ -20,6 +22,8 @@ pub use workspace::{WorkspaceConfig, valid_repository};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Optional authenticated multi-host topology.
+    pub network: Option<NetworkConfig>,
     /// Configuration schema version, currently one.
     pub schema_version: u32,
     /// Controller scale-set classes and database location.

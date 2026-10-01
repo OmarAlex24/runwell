@@ -1,8 +1,8 @@
 # runwell architecture
 
-Status: accepted target architecture for a pre-alpha implementation. M0 contains
-public API skeletons, configuration validation, and CLI help/version behavior.
-It does not yet run jobs, communicate with GitHub, or operate host resources.
+Status: pre-alpha implementation. Standalone execution and the M5b authenticated
+controller/node split are implemented. Production scheduling/classification and
+metrics integrate through explicit ports; real two-host validation remains due.
 
 ## System boundary
 
@@ -110,7 +110,30 @@ Controller-to-node communication uses mTLS, authenticating both ends and binding
 node identities to certificates. Reservations and lifecycle operations carry
 durable identities and must tolerate duplicate delivery. Reject unauthenticated
 peers and stale node snapshots. Certificate renewal and reconnect must not
-invalidate live job accounting. Transport RPCs are reserved for a later milestone.
+invalidate live job accounting.
+
+M5b implements HTTP/2 JSON RPC with TLS 1.3-only mutual authentication. URI SANs
+bind role and stable identity, and configured membership authorizes peers. Node
+reports include capacity, reservations, free slots, PSI, process state and a
+crash-durable monotonic sequence. Full NDJSON state snapshots stream over `/v1/events`;
+periodic registration and controller polling repair missed events on reconnect.
+See [ADR 0005](adr/0005-controller-node-mtls.md) for protocol and failure semantics.
+
+The controller writes placement before admission and a one-shot JIT claim before
+POST. Each node keeps a secret-free SQLite execution spool. Its phases are
+Admitted -> Prepared -> WorkspaceReady -> Starting -> Started -> Stopped -> Cleaned.
+Starting is durable before the host call; cleanup tombstones reject late starts.
+The global job state machine remains Queued -> Admitted -> RunnerCreated ->
+Running -> Completed/Failed/Orphaned, with remote-deletion and measurement gates
+on cleanup. Unreachable/watchdog attempts are fenced and placed in a durable
+failure outbox; recovery cannot make them eligible for a second runner.
+
+The fleet adapter implements the same NodeBackend interface used by the in-process
+standalone controller and consumes SchedulingPolicy snapshots. Hooks::failure
+and Hooks::report are the M5a classifier/retry and metrics integration points.
+Failure delivery uses an idempotency key because crash-safe external callbacks
+require consumer deduplication. See [operations](operations.md) for drain, restart,
+certificate distribution, and the limitations of node process observations.
 
 ## Runner and lifecycle
 
@@ -147,7 +170,9 @@ Measurements must survive a crash between sampling and slice removal.
 
 | Crate | Responsibility |
 | --- | --- |
-| runwell | CLI and eventual controller/node task wiring |
+| runwell | CLI and controller/node/certificate task wiring |
+| runwell-controller | Multi-node placement, release selection, GitHub wiring and resilience hooks |
+| runwell-transport | TLS 1.3 HTTP/2 RPC, authenticated identities, node execution spool |
 | runwell-config | TOML schema, validation, credential file references |
 | runwell-github | REST, App JWT/PAT auth, installation tokens |
 | runwell-scaleset | auth/api/listener/supervisor/runner protocol-port boundaries |
@@ -177,3 +202,11 @@ Trusted repositories only. The root daemon, shared kernel, privileged Docker API
 and administrative GitHub credentials require a single-tenant trust model. Never
 run public repositories that accept fork pull requests. See [SECURITY.md](../SECURITY.md).
 M0 adds no runner persistence, cache service, microVM isolation, or deployment units.
+
+Network execution timing is journaled separately from placement/preparation.
+Runner renewal evidence is independent of node liveness, with durable timestamps
+and a start grace period. Terminal placements reconcile even bare admissions;
+cleaned node spools keep compact tombstones and active queries use an index.
+Across all HTTP/2 connections, a shared handler budget survives request timeouts,
+with duplicate lifecycle calls joining one in-flight operation. Node reporting
+and registration do not block signals or the drain deadline.

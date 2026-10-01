@@ -321,6 +321,14 @@ impl NodeBackend for LinuxBackend {
     fn recover<'a>(&'a self, plan: &'a JobPlan) -> NodeFuture<'a, ()> {
         Box::pin(async move { self.proxy_environment(&plan.slice).await.map(|_| ()) })
     }
+    fn runner_heartbeat(&self, id: u64) -> NodeFuture<'_, Option<i64>> {
+        let directory = self.settings.runners_dir.join(format!("j{id}/_diag"));
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || crate::heartbeat::latest(&directory))
+                .await
+                .map_err(|_| Error::Io)?
+        })
+    }
     fn inspect(&self, id: u64) -> NodeFuture<'_, ProcessState> {
         Box::pin(self.systemd.inspect(id))
     }

@@ -2,10 +2,11 @@ use crate::{Error, NodeFuture};
 use runwell_admission::Pressure;
 use runwell_runner::LaunchSpec;
 use runwell_store::JobMeasurement;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Resource constraints for a job subtree. Swap is always disabled.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SliceSpec {
     /// Local durable identity.
     pub job_id: u64,
@@ -45,7 +46,7 @@ pub fn service_unit(id: u64) -> String {
     format!("rw-j{id}.service")
 }
 /// Preparation plan containing no credentials; safe for an authenticated RPC.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobPlan {
     /// Job slice limits.
     pub slice: SliceSpec,
@@ -55,7 +56,7 @@ pub struct JobPlan {
     pub template_version: String,
 }
 /// Observed process state, independent of GitHub workflow result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProcessState {
     /// Running, activating, or stopping; must be preserved on restart.
     Running,
@@ -65,7 +66,7 @@ pub enum ProcessState {
     Absent,
 }
 /// Inventory identity, combining surviving units and installation directories.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalJob {
     /// Durable local job identity inferred from the name.
     pub id: u64,
@@ -73,6 +74,35 @@ pub struct LocalJob {
 /// Local-node boundary. Each operation is idempotent by durable job identity.
 /// M5 can implement these same methods as authenticated network calls.
 pub trait NodeBackend: Send + Sync {
+    /// Fleet adapters own admission and scheduling; local backends retain the
+    /// standalone controller's in-process reservation implementation.
+    fn manages_admission(&self) -> bool {
+        false
+    }
+    /// Reconcile reports and deliver durable failure/metrics hooks.
+    fn maintenance(&self) -> NodeFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    /// Schedule using a pure policy; return only jobs that can make progress.
+    fn schedule<'a>(
+        &'a self,
+        jobs: &'a [runwell_store::Job],
+        _now: u64,
+    ) -> NodeFuture<'a, Vec<i64>> {
+        Box::pin(async move { Ok(jobs.iter().map(|j| j.id).collect()) })
+    }
+    /// Authoritative node acceptance, before acquisition or JIT generation.
+    fn admit<'a>(&'a self, _job: &'a runwell_store::Job) -> NodeFuture<'a, bool> {
+        Box::pin(async { Ok(true) })
+    }
+    /// Optional fleet-wide realizable class capacities.
+    fn fleet_capacities<'a>(
+        &'a self,
+        _classes: &'a std::collections::BTreeMap<i64, runwell_config::JobClass>,
+    ) -> NodeFuture<'a, Option<std::collections::BTreeMap<i64, u32>>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Ensure parent limits before any admission.
     fn initialize(&self) -> NodeFuture<'_, ()>;
     /// Host and ci.slice PSI combined conservatively.
@@ -114,13 +144,27 @@ pub trait NodeBackend: Send + Sync {
     fn recover<'a>(&'a self, _plan: &'a JobPlan) -> NodeFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
-    /// Inspect a surviving process without stopping it.
+    /// Timestamp of the last runner job-renewal heartbeat, independent of host
+    /// liveness or process state. None means no renewal evidence is available.
+    fn runner_heartbeat(&self, _id: u64) -> NodeFuture<'_, Option<i64>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// Observe the runner process without treating liveness as a heartbeat.
     fn inspect(&self, id: u64) -> NodeFuture<'_, ProcessState>;
     /// Sample final counters while the slice still exists.
     fn measure(&self, id: u64) -> NodeFuture<'_, JobMeasurement>;
     /// Stop the service and job-owned Docker resources, keeping the slice for final sampling.
     /// The controller must journal a successful DELETE before calling this.
     fn stop_runner(&self, id: u64) -> NodeFuture<'_, ()>;
+    /// Durable terminal-result hook for classification, learned durations and metrics.
+    /// May be redelivered after a crash; implementations must deduplicate by job.
+    fn finished<'a>(
+        &'a self,
+        _job: &'a runwell_store::Job,
+        _sample: &'a JobMeasurement,
+    ) -> NodeFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
     /// List owned services/slices and independent installation directories.
     fn inventory(&self) -> NodeFuture<'_, Vec<LocalJob>>;
     /// Stop and await units, then remove the installation. Called only after

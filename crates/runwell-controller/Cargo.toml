@@ -1,0 +1,29 @@
+[package]
+name = "runwell-controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+tracing.workspace = true
+secrecy.workspace = true
+runwell-transport = { version = "=0.1.0", path = "../runwell-transport" }
+runwell-node = { version = "=0.1.0", path = "../runwell-node" }
+runwell-store = { version = "=0.1.0", path = "../runwell-store" }
+runwell-config = { version = "=0.1.0", path = "../runwell-config" }
+runwell-admission = { version = "=0.1.0", path = "../runwell-admission" }
+runwell-scheduler = { version = "=0.1.0", path = "../runwell-scheduler" }
+runwell-runner = { version = "=0.1.0", path = "../runwell-runner" }
+runwell-scaleset = { version = "=0.1.0", path = "../runwell-scaleset" }
+runwell-workspace = { version = "=0.1.0", path = "../runwell-workspace" }
+
+[dev-dependencies]
+tempfile.workspace = true

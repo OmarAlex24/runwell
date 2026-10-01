@@ -9,6 +9,7 @@ pub(crate) enum Mutation {
     Completion(crate::CompletedJob),
     RetryClaim(crate::RetryClaim),
     RetryFinish(String, i64, u32, crate::RetryStatus),
+    Network(crate::network::NetworkMutation),
     Queue(NewJob),
     Transition(i64, State),
     Intent(Runner),
@@ -33,6 +34,7 @@ async fn apply(c: &mut PoolConnection<Sqlite>, mutation: Mutation) -> Result<i64
         Mutation::Completion(job) => return crate::history::record(c, job).await,
         Mutation::RetryClaim(claim) => return crate::retries::claim(c, claim).await,
         Mutation::RetryFinish(repo, run, attempt, status) => return crate::retries::finish(c, &repo, run, attempt, status).await,
+        Mutation::Network(m) => return crate::network_writer::apply(c, m).await,
         Mutation::Queue(j) => {
             let memory = i64::try_from(j.reserved_memory).map_err(|_| Error::Corrupt)?;
             return Ok(sqlx::query_scalar("INSERT INTO jobs (scale_set_id,request_id,github_job_id,workflow_run_id,repo,name,class,reserved_cpu,reserved_memory) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(scale_set_id,request_id) DO UPDATE SET id=id RETURNING id")

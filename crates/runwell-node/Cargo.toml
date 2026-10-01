@@ -33,6 +33,7 @@ zbus_systemd.workspace = true
 rustix.workspace = true
 
 [dev-dependencies]
+rustix.workspace = true
 wiremock = "=0.6.5"
 tempfile = "=3.27.0"
 serde_json.workspace = true

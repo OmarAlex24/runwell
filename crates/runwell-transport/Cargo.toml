@@ -1,0 +1,37 @@
+[package]
+name = "runwell-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
+x509-parser.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+secrecy.workspace = true
+futures-util.workspace = true
+jiff.workspace = true
+sha2.workspace = true
+runwell-node = { version = "=0.1.0", path = "../runwell-node" }
+runwell-store = { version = "=0.1.0", path = "../runwell-store" }
+runwell-config = { version = "=0.1.0", path = "../runwell-config" }
+runwell-admission = { version = "=0.1.0", path = "../runwell-admission" }
+runwell-runner = { version = "=0.1.0", path = "../runwell-runner" }
+runwell-workspace = { version = "=0.1.0", path = "../runwell-workspace" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile.workspace = true

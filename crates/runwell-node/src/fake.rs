@@ -9,10 +9,18 @@ use tokio::sync::Mutex;
 /// Inspectable host state; never stores JIT material.
 #[derive(Default)]
 pub struct FakeState {
+    /// Simulated overlay mounts owned by jobs.
+    pub mounts: std::collections::BTreeSet<u64>,
+    /// Simulated Docker containers owned by jobs.
+    pub containers: std::collections::BTreeSet<u64>,
+    /// Preparation fails as with ENOSPC until identities are removed.
+    pub prepare_failures: std::collections::BTreeSet<u64>,
     /// Planned slices/directories, keyed by durable identity.
     pub plans: BTreeMap<u64, JobPlan>,
     /// Process states.
     pub processes: BTreeMap<u64, ProcessState>,
+    /// Independently injected runner heartbeat timestamps.
+    pub heartbeats: BTreeMap<u64, i64>,
     /// Final measurements to return.
     pub measurements: BTreeMap<u64, JobMeasurement>,
     /// Current host pressure.
@@ -58,6 +66,9 @@ impl NodeBackend for FakeBackend {
         Box::pin(async move {
             plan.slice.validate()?;
             let mut state = self.state.lock().await;
+            if state.prepare_failures.contains(&plan.slice.job_id) {
+                return Err(Error::Io);
+            }
             if state
                 .plans
                 .values()
@@ -69,6 +80,12 @@ impl NodeBackend for FakeBackend {
                 .operations
                 .push(format!("prepare:{}", plan.slice.job_id));
             state.plans.insert(plan.slice.job_id, plan.clone());
+            Ok(())
+        })
+    }
+    fn prepare_workspace<'a>(&'a self, job: &'a runwell_store::Job) -> NodeFuture<'a, ()> {
+        Box::pin(async move {
+            self.state.lock().await.mounts.insert(job.id as u64);
             Ok(())
         })
     }
@@ -108,6 +125,7 @@ impl NodeBackend for FakeBackend {
                 return Ok(());
             }
             state.starts += 1;
+            state.containers.insert(plan.slice.job_id);
             state
                 .operations
                 .push(format!("start:{}", plan.slice.job_id));
@@ -116,6 +134,9 @@ impl NodeBackend for FakeBackend {
                 .insert(plan.slice.job_id, ProcessState::Running);
             Ok(())
         })
+    }
+    fn runner_heartbeat(&self, id: u64) -> NodeFuture<'_, Option<i64>> {
+        Box::pin(async move { Ok(self.state.lock().await.heartbeats.get(&id).copied()) })
     }
     fn inspect(&self, id: u64) -> NodeFuture<'_, ProcessState> {
         Box::pin(async move {
@@ -173,8 +194,11 @@ impl NodeBackend for FakeBackend {
             if state.cleanup_failures.contains(&id) {
                 return Err(Error::Io);
             }
+            state.containers.remove(&id);
+            state.mounts.remove(&id);
             state.plans.remove(&id);
             state.processes.remove(&id);
+            state.heartbeats.remove(&id);
             Ok(())
         })
     }

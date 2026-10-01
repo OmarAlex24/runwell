@@ -118,9 +118,10 @@ impl Controller {
             };
             self.store.transition(job.id, terminal).await?;
         }
-        self.backend
-            .harvest_workspace(&self.store.job(job.id).await?)
-            .await?;
+        let final_job = self.store.job(job.id).await?;
+        let sample = self.store.measurement(job.id).await?.ok_or(Error::Config)?;
+        self.backend.finished(&final_job, &sample).await?;
+        self.backend.harvest_workspace(&final_job).await?;
         self.backend.cleanup(job.id as u64).await?;
         self.store.cleaned(job.id).await?;
         self.admission.release(job.id as u64);
