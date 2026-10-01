@@ -4,11 +4,20 @@
 mod availability;
 pub use availability::{RunnerSlots, RunwellWithRunners, online_nodes};
 mod concurrency;
+mod fairness;
 mod graph;
+mod history;
+mod production;
 pub use concurrency::{
     RunArrival, cancel_deadlines, parallel_slot, requires_heavy_slot, runner_headroom,
 };
-pub use graph::{GraphError, critical_paths};
+pub use fairness::FairState;
+pub use graph::{Criticality, GraphError, critical_paths, graph_criticality};
+pub use history::{DurationEstimate, HistoryKey, HistorySnapshot};
+pub use production::{
+    Decision, JobIdentity, NodeStatus, Production, ProductionConfig, ProductionError,
+    ProductionSnapshot,
+};
 use runwell_admission::{ReservationAdmission, Resources};
 
 /// Priority among jobs that can currently be placed.

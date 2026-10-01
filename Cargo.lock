@@ -2139,11 +2139,17 @@ dependencies = [
 name = "runwell-github"
 version = "0.1.0"
 dependencies = [
+ "jiff",
  "jsonwebtoken",
  "reqwest",
+ "runwell-config",
  "secrecy",
+ "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -2151,7 +2157,12 @@ name = "runwell-metrics"
 version = "0.1.0"
 dependencies = [
  "prometheus-client",
+ "reqwest",
+ "serde",
+ "serde_json",
  "thiserror",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -2205,6 +2216,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "runwell-retry"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "runwell-github",
+ "runwell-store",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "wiremock",
+]
+
+[[package]]
 name = "runwell-runner"
 version = "0.1.0"
 dependencies = [
@@ -2245,7 +2273,9 @@ dependencies = [
 name = "runwell-scheduler"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "runwell-admission",
+ "serde",
  "thiserror",
 ]
 
@@ -2285,6 +2315,7 @@ dependencies = [
 name = "runwell-store"
 version = "0.1.0"
 dependencies = [
+ "runwell-scheduler",
  "serde",
  "serde_json",
  "sqlx",

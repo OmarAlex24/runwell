@@ -38,16 +38,19 @@ pub enum Policy {
     CriticalPath,
     /// Resource admission and repository CPU service fairness.
     FairShare,
+    /// Hierarchical weighted fairness, criticality, learned durations and admission headroom.
+    Production,
 }
 impl Policy {
     /// Complete comparison set, in stable output order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Baseline,
         Self::Equivalent,
         Self::Fifo,
         Self::Shortest,
         Self::CriticalPath,
         Self::FairShare,
+        Self::Production,
     ];
     /// CLI/report name.
     pub fn name(self) -> &'static str {
@@ -58,6 +61,7 @@ impl Policy {
             Self::Shortest => "shortest",
             Self::CriticalPath => "critical-path",
             Self::FairShare => "fair-share",
+            Self::Production => "production",
         }
     }
     /// Parse a CLI policy name. `runwell` aliases critical-path.
@@ -75,7 +79,7 @@ impl Policy {
     }
     pub(crate) fn priority(self) -> Option<Priority> {
         match self {
-            Self::Baseline | Self::Equivalent => None,
+            Self::Baseline | Self::Equivalent | Self::Production => None,
             Self::Fifo => Some(Priority::Fifo),
             Self::Shortest => Some(Priority::Shortest),
             Self::CriticalPath => Some(Priority::CriticalPath),
@@ -163,3 +167,6 @@ mod model_tests;
 
 #[cfg(test)]
 mod availability_tests;
+
+#[cfg(test)]
+mod production_tests;

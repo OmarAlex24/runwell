@@ -8,6 +8,7 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 mod cancellation;
 mod capacity;
 mod placement;
+mod production;
 mod progress;
 
 const EPS: f64 = 1e-7;
@@ -59,6 +60,10 @@ struct Engine<'a> {
     config: &'a Config,
     policy: Policy,
     selector: Box<dyn SchedulingPolicy>,
+    fair_state: runwell_scheduler::FairState,
+    duration_windows:
+        std::collections::BTreeMap<runwell_scheduler::HistoryKey, std::collections::VecDeque<f64>>,
+    criticality: Vec<runwell_scheduler::Criticality>,
     now: f64,
     nodes: Vec<NodeHeadroom>,
     runner_slots: Vec<Vec<runwell_scheduler::RunnerSlots>>,
@@ -140,6 +145,19 @@ pub(crate) fn replay_allocation(
         config,
         policy,
         selector,
+        fair_state: runwell_scheduler::FairState::default(),
+        duration_windows: std::collections::BTreeMap::new(),
+        criticality: if policy == Policy::Production {
+            runwell_scheduler::graph_criticality(
+                &trace
+                    .jobs
+                    .iter()
+                    .map(|j| j.needs.clone())
+                    .collect::<Vec<_>>(),
+            )?
+        } else {
+            Vec::new()
+        },
         now: 0.0,
         runner_slots: nodes
             .iter()

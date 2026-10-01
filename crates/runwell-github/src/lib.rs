@@ -1,62 +1,34 @@
-//! GitHub REST access and GitHub App or PAT authentication for runwell.
-//!
-//! Credentials must never enter logs. App JWTs use RS256 with bounded lifetime;
-//! installation tokens and Actions-service credentials have separate lifecycles.
-
+//! GitHub REST access with App/PAT auth and bounded 401 recovery for rerun requests.
+//! No error includes credentials, request URLs, or response bodies.
 #![deny(missing_docs)]
+mod auth;
+mod client;
+pub use auth::{AppJwtSigner, Auth, Rs256Signer};
+pub use client::{RestClient, RunJob, RunState};
 
-use secrecy::SecretString;
-
-/// A GitHub credential kept out of ordinary debug output.
-pub enum Auth {
-    /// A personal access token.
-    Pat(SecretString),
-    /// GitHub App identity and signing material.
-    App {
-        /// App identifier used as JWT issuer.
-        app_id: u64,
-        /// Installation whose token will be requested.
-        installation_id: u64,
-        /// PEM-encoded private key.
-        private_key: SecretString,
-    },
-}
-
-/// GitHub App token signing boundary.
-pub trait AppJwtSigner {
-    /// Sign an RS256 JWT with iat offset for skew and expiration within ten minutes.
-    fn sign(
-        &self,
-        app_id: u64,
-        private_key: &SecretString,
-        now_unix: u64,
-    ) -> Result<SecretString, Error>;
-}
-
-/// REST client boundary; endpoint calls are deferred beyond M0.
-pub struct RestClient {
-    /// HTTPS API base, separate from Actions-service URLs.
-    pub api_base: reqwest::Url,
-    /// Authentication credential, never formatted for logging.
-    pub auth: Auth,
-}
-
-impl RestClient {
-    /// Exchange an App JWT for an installation token; currently unimplemented.
-    pub async fn installation_token(&self) -> Result<SecretString, Error> {
-        Err(Error::Unimplemented)
-    }
-
-    /// Read a REST resource; currently unimplemented and makes no request.
-    pub async fn get(&self, _path: &str) -> Result<serde_json::Value, Error> {
-        Err(Error::Unimplemented)
-    }
-}
-
-/// An operation that has not been implemented in this milestone.
+/// Sanitized REST errors.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The public interface is reserved for a later milestone.
-    #[error("this operation is not implemented in the M0 bootstrap")]
-    Unimplemented,
+    /// Invalid endpoint, repository, identity, or credential configuration.
+    #[error("invalid GitHub REST configuration")]
+    Config,
+    /// Credential could not be loaded or signed.
+    #[error("GitHub authentication failed")]
+    Auth,
+    /// A transport failure; a POST may already have reached GitHub.
+    #[error("GitHub transport outcome is uncertain")]
+    Transport,
+    /// HTTP status only; response contents are not exposed.
+    #[error("GitHub returned HTTP {0}")]
+    Status(u16),
+    /// An incomplete or malformed API response.
+    #[error("invalid GitHub REST response")]
+    Response,
+}
+impl Error {
+    /// Whether a mutating request might have taken effect and must not be resent.
+    pub fn ambiguous(&self) -> bool {
+        matches!(self, Self::Transport | Self::Response)
+            || matches!(self, Self::Status(code) if *code >= 500)
+    }
 }

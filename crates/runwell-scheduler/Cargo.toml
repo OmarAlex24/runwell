@@ -11,4 +11,8 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+serde.workspace = true
 runwell-admission = { version = "=0.1.0", path = "../runwell-admission" }
+
+[dev-dependencies]
+proptest.workspace = true

@@ -119,7 +119,14 @@ fn simulate_emits_parseable_json_and_markdown() {
         );
         if format == "json" {
             let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(report["rows"].as_array().unwrap().len(), 6);
+            assert_eq!(report["rows"].as_array().unwrap().len(), 7);
+            assert!(
+                report["rows"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["policy"] == "production")
+            );
             assert_eq!(report["calibration"][0]["within_ten_percent"], true);
         } else {
             assert!(

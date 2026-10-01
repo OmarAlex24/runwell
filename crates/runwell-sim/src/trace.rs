@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Job {
+    pub workflow_job: String,
+    pub pull_request: String,
     pub run: usize,
     pub repo: usize,
     pub pool: usize,
@@ -166,6 +168,16 @@ impl PreparedTrace {
                 diagnostics.external_jobs += 1;
             }
             jobs.push(Job {
+                workflow_job: format!(
+                    "{}/{}",
+                    o.raw.workflow.as_deref().unwrap_or("unknown"),
+                    o.raw.workflow_job_id.as_deref().unwrap_or(&o.raw.job_name)
+                ),
+                pull_request: o
+                    .raw
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| format!("run-{}", o.raw.run_id)),
                 run,
                 repo,
                 pool,
