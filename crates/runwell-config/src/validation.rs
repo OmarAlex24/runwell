@@ -10,6 +10,10 @@ impl Config {
 
     /// Reject invalid reservations, ambiguous classes, paths, and PSI thresholds.
     pub fn validate(&self) -> Result<(), Error> {
+        if let Some(network) = &self.network {
+            network.validate()?;
+            require(self.transport.is_some(), "network mode requires mTLS files")?;
+        }
         require(self.schema_version == 1, "schema_version must be 1")?;
         require(!self.node.id.trim().is_empty(), "node.id must not be empty")?;
         require(self.node.cpu_slots > 0, "node.cpu_slots must be positive")?;

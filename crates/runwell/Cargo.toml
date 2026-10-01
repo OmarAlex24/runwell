@@ -23,3 +23,8 @@ toml.workspace = true
 runwell-node = { version = "=0.1.0", path = "../runwell-node" }
 runwell-config = { version = "=0.1.0", path = "../runwell-config" }
 tracing-subscriber.workspace = true
+
+runwell-controller = { version = "=0.1.0", path = "../runwell-controller" }
+runwell-transport = { version = "=0.1.0", path = "../runwell-transport" }
+runwell-store = { version = "=0.1.0", path = "../runwell-store" }
+tokio-util.workspace = true

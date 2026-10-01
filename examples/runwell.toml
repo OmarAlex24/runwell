@@ -70,3 +70,31 @@ version = "2.337.0"
 # sha256 = "<64 hex digits>" # Otherwise verified against release notes; fail closed.
 # Updates: warn after 21 days, refresh at 25, refuse stale templates at 30.
 # Alternatively use github.auth kind = "pat_env", token_env = "RUNWELL_GITHUB_TOKEN".
+
+# Network mode: runwell controller --config controller.toml
+# On each host: runwell node --config node.toml
+# Copy this file per host, set node.id, and select that peer's TLS files.
+# [standalone] also supplies the local execution settings in network mode.
+[network]
+controller_id = "controller-1"
+controller_listen = "0.0.0.0:9443"
+controller_address = "controller.internal:9443"
+node_listen = "0.0.0.0:9444"
+rpc_seconds = 30
+rpc_attempts = 3
+report_seconds = 5
+lost_seconds = 90
+preparation_seconds = 3600
+expected_seconds = 1800
+watchdog_multiple = 4
+heartbeat_seconds = 180
+
+[[network.nodes]]
+id = "node-1"
+address = "node-1.internal:9444"
+class = "general"
+
+[[network.nodes]]
+id = "node-2"
+address = "node-2.internal:9444"
+class = "general"

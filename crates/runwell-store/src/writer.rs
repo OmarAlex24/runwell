@@ -6,6 +6,7 @@ pub(crate) struct Command {
     pub reply: oneshot::Sender<Result<i64, Error>>,
 }
 pub(crate) enum Mutation {
+    Network(crate::network::NetworkMutation),
     Queue(NewJob),
     Transition(i64, State),
     Intent(Runner),
@@ -27,6 +28,7 @@ pub(crate) async fn run(mut connection: PoolConnection<Sqlite>, mut rx: mpsc::Re
 }
 async fn apply(c: &mut PoolConnection<Sqlite>, mutation: Mutation) -> Result<i64, Error> {
     let changed = match mutation {
+        Mutation::Network(m) => return crate::network_writer::apply(c, m).await,
         Mutation::Queue(j) => {
             let memory = i64::try_from(j.reserved_memory).map_err(|_| Error::Corrupt)?;
             return Ok(sqlx::query_scalar("INSERT INTO jobs (scale_set_id,request_id,github_job_id,workflow_run_id,repo,name,class,reserved_cpu,reserved_memory) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(scale_set_id,request_id) DO UPDATE SET id=id RETURNING id")

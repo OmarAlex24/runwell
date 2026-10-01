@@ -22,7 +22,7 @@ fn help_lists_all_subcommands() {
 }
 
 #[test]
-fn unfinished_commands_exit_two_and_explain_status() {
+fn daemon_commands_require_explicit_configuration() {
     for command in ["controller", "node"] {
         let output = Command::new(env!("CARGO_BIN_EXE_runwell"))
             .arg(command)
@@ -30,7 +30,7 @@ fn unfinished_commands_exit_two_and_explain_status() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
         let message = String::from_utf8(output.stderr).unwrap();
-        assert!(message.contains(command) && message.contains("not implemented"));
+        assert!(message.contains(command) && message.contains("--config"));
     }
 }
 

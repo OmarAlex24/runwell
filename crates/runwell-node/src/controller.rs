@@ -61,11 +61,21 @@ impl Controller {
         );
         Ok(Self {
             store,
-            backend,
+            backend: backend.clone(),
             api,
             classes,
             settings,
-            prefix: format!("rw-{}-j", config.node.id),
+            prefix: format!(
+                "rw-{}-j",
+                if backend.manages_admission() {
+                    config
+                        .network
+                        .as_ref()
+                        .map_or(config.node.id.as_str(), |n| n.controller_id.as_str())
+                } else {
+                    config.node.id.as_str()
+                }
+            ),
             admission,
             brake,
             draining: false,
@@ -102,6 +112,12 @@ impl Controller {
     /// Realizable class capacity to advertise. Active registrations still consume
     /// slots; paused admission advertises zero, without stopping existing jobs.
     pub async fn capacities(&mut self, now: u64) -> Result<BTreeMap<i64, u32>, Error> {
+        if let Some(mut capacities) = self.backend.fleet_capacities(&self.classes).await? {
+            if self.draining || self.outdated.is_some() {
+                capacities.values_mut().for_each(|v| *v = 0);
+            }
+            return Ok(capacities);
+        }
         let brake = self.pressure(now).await?;
         let jobs = self.store.jobs().await?;
         let runners = self.store.runners().await?;

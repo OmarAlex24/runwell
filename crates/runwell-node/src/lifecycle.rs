@@ -91,10 +91,16 @@ impl Controller {
     }
     /// Reconsider queued demand, sample exits, and retry retained cleanup work.
     pub async fn tick(&mut self, now: u64) -> Result<(), Error> {
+        self.backend.maintenance().await?;
         for runner in self.store.runners().await?.iter().filter(|r| !r.cleaned) {
             let job = self.store.job(runner.job_id).await?;
-            if job.state != State::Admitted {
-                self.monitor(&job, runner).await?;
+            if job.state != State::Admitted
+                && let Err(error) = self.monitor(&job, runner).await
+            {
+                if !self.backend.manages_admission() {
+                    return Err(error);
+                }
+                tracing::warn!(job_id = job.id, %error, "node cleanup retained for retry");
             }
         }
         if self.draining {
@@ -108,9 +114,21 @@ impl Controller {
             self.outdated = None;
         }
 
-        for job in self.store.jobs().await? {
-            if matches!(job.state, State::Queued | State::Admitted) {
-                self.progress(job, now).await?;
+        let jobs: Vec<_> = self
+            .store
+            .jobs()
+            .await?
+            .into_iter()
+            .filter(|j| matches!(j.state, State::Queued | State::Admitted))
+            .collect();
+        for id in self.backend.schedule(&jobs, now).await? {
+            if let Some(job) = jobs.iter().find(|j| j.id == id)
+                && let Err(error) = self.progress(job.clone(), now).await
+            {
+                if !self.backend.manages_admission() {
+                    return Err(error);
+                }
+                tracing::warn!(job_id = id, %error, "placement retained for retry");
             }
         }
         Ok(())
@@ -121,9 +139,11 @@ impl Controller {
             return Ok(());
         }
         if job.state == State::Queued {
-            if !self
-                .admission
-                .reserve(job.id as u64, reservation(&job), brake)
+            if !self.backend.admit(&job).await?
+                || (!self.backend.manages_admission()
+                    && !self
+                        .admission
+                        .reserve(job.id as u64, reservation(&job), brake))
             {
                 return Ok(());
             }
@@ -174,6 +194,9 @@ impl Controller {
         if self.pressure(now).await? != Brake::Open {
             return Ok(());
         }
+        if !self.backend.admit(&job).await? {
+            return Ok(());
+        }
         if !job.acquired {
             let acquired = job.metadata.request_id < 0
                 || self
@@ -188,6 +211,16 @@ impl Controller {
             self.store.acquired(job.id).await?;
         }
         if self.pressure(now).await? != Brake::Open {
+            return Ok(());
+        }
+        if !self.backend.admit(&job).await? {
+            return Ok(());
+        }
+        if !self.store.claim_jit(job.id).await? {
+            // Never repeat an ambiguous POST. Name lookup/delete reconcile it;
+            // a fresh scheduling attempt needs a new durable job identity.
+            self.store.transition(job.id, State::Orphaned).await?;
+            self.finish(&job, &runner, ProcessState::Absent).await?;
             return Ok(());
         }
         let registration = self

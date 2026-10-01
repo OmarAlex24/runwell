@@ -62,3 +62,29 @@ with a tool-specific suffix. This isolates runs, attempts, jobs, and matrix
 indices outside the checkout, using contexts permitted at that location.
 It avoids relying on shell expansion inside YAML environment values.
 Cache retention on persistent runners remains an operator decision.
+
+## M5b authenticated fleet transport
+
+Versions checked against the crates.io API on 2026-10-01 (including the complete
+patch version), then pinned in `[workspace.dependencies]`:
+
+| Crate | Pin | Purpose |
+| --- | --- | --- |
+| [rustls](https://crates.io/crates/rustls/0.23.45) | `=0.23.45` | TLS 1.3, mandatory peer certificates, existing aws-lc provider |
+| [tokio-rustls](https://crates.io/crates/tokio-rustls/0.26.6) | `=0.26.6` | Tokio TLS streams, explicit h2 ALPN |
+| [rcgen](https://crates.io/crates/rcgen/0.14.10) | `=0.14.10` | Offline ECDSA P-256 CA and peer certificate issuance |
+| [x509-parser](https://crates.io/crates/x509-parser/0.18.1) | `=0.18.1` | Strict URI SAN identity extraction after rustls verification |
+
+Hyper's existing exact pin gains its `http2` feature. Existing serde, Hyper,
+http-body-util and Tokio pins supply the versioned JSON RPC and NDJSON event
+stream; no protoc or protobuf build step is introduced. rustls and rcgen disable
+default crypto selection and explicitly use aws-lc, already present for GitHub
+JWTs and reqwest. These additions require no advisory or license exceptions;
+`cargo deny check` passes with the repository's existing duplicate-version warning
+policy. The [ADR addendum](adr/0005-controller-node-mtls.md#m5b-addendum-http2-json-rpc-october-2026)
+records wire, identity, durability and rotation decisions.
+
+M5b review fixes reuse the existing workspace-pinned `sha2` for in-flight RPC
+fingerprints and `rustix` for bounded, no-follow runner heartbeat reads. Tokio's
+existing pinned version enables `test-util` only for deterministic drain tests.
+No dependency version or new external package was added for these fixes.

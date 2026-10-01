@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Durable lifecycle states. Terminal states never transition back to active.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum State {
     /// Observed demand, with no local reservation.
     Queued,
@@ -52,7 +52,7 @@ impl std::str::FromStr for State {
     }
 }
 /// Metadata for durable, deduplicated demand. No credential fields are accepted.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewJob {
     /// Owning GitHub scale set.
     pub scale_set_id: i64,
@@ -75,7 +75,7 @@ pub struct NewJob {
 }
 /// Actual workflow execution bound from a runner event, independent of the
 /// request originally acquired to provision its capacity.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Execution {
     /// Actual GitHub request identity.
     pub request_id: i64,
@@ -89,7 +89,7 @@ pub struct Execution {
     pub name: String,
 }
 /// Persisted job snapshot.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     /// Local monotonically allocated identity, used for directories and units.
     pub id: i64,
@@ -151,7 +151,7 @@ pub struct PsiMeasurement {
     pub memory_full_total: u64,
 }
 /// Final durable cgroup sample, written before teardown.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct JobMeasurement {
     /// Local job/reservation identity.
     pub job_id: i64,
