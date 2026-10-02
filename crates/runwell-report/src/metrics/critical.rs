@@ -96,6 +96,50 @@ pub fn graph(jobs: &[&TraceJob]) -> Graph {
     }
 }
 
+/// Keep dependencies through skipped jobs when reporting only executed jobs.
+/// Dropping skipped records before graph resolution would make valid needs
+/// references look missing and silently discard the whole workflow graph.
+pub fn executed_graph(all: &[&TraceJob], active: &[&TraceJob]) -> Graph {
+    let full = graph(all);
+    if !full.explicit {
+        return graph(active);
+    }
+    let active_names: BTreeMap<_, _> = active
+        .iter()
+        .enumerate()
+        .map(|(i, j)| (&j.job_name, i))
+        .collect();
+    let all_names: BTreeMap<_, _> = all
+        .iter()
+        .enumerate()
+        .map(|(i, j)| (&j.job_name, i))
+        .collect();
+    let mut predecessors = Vec::new();
+    for job in active {
+        let mut pending = full.predecessors[all_names[&job.job_name]].clone();
+        let mut seen = BTreeSet::new();
+        let mut parents = BTreeSet::new();
+        while let Some(i) = pending.pop() {
+            if !seen.insert(i) {
+                continue;
+            }
+            if let Some(&parent) = active_names.get(&all[i].job_name) {
+                parents.insert(parent);
+            } else if all[i].conclusion.as_deref() == Some("skipped") {
+                pending.extend(&full.predecessors[i]);
+            } else {
+                // An excluded execution is missing evidence, not a zero-work node.
+                return graph(active);
+            }
+        }
+        predecessors.push(parents.into_iter().collect());
+    }
+    Graph {
+        predecessors,
+        explicit: true,
+    }
+}
+
 fn acyclic(graph: &Graph) -> bool {
     let mut remaining: BTreeSet<_> = (0..graph.predecessors.len()).collect();
     while !remaining.is_empty() {

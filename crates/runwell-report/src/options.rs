@@ -44,6 +44,9 @@ pub struct ReportArgs {
     /// Cache raw API responses here (default: platform cache directory/runwell/report).
     #[arg(long)]
     pub cache_dir: Option<PathBuf>,
+    /// Replay the cached API snapshot regardless of age; never make network requests.
+    #[arg(long, conflicts_with = "from_trace")]
+    pub offline_cache: bool,
     /// Download logs for at most N failed/cancelled jobs to improve classification.
     #[arg(long, default_value_t = 0)]
     pub fetch_logs: usize,

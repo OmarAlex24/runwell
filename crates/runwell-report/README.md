@@ -18,7 +18,7 @@ API run searches are split when they exceed GitHub's 1,000-result search cap. Al
 ## Metrics and interpretation
 
 - E2E: run creation to last executed job completion, for successful runs that were never rerun. Groups are repository and event; all workflows in those groups count. Per-job tables retain workflow identity.
-- Critical path: dependency names from workflow YAML at the commit SHA when the mapping is complete and unambiguous. Matrix jobs, reusable workflows, dynamic names, unavailable YAML, or invalid graphs fall back to timestamps. Inference walks backwards using the latest predecessor completion at or before job creation plus three seconds, constrained to finish before the current job starts.
+- Critical path: dependency names from workflow YAML at the commit SHA when the mapping is complete and unambiguous. Unambiguous named matrix children are mapped and skipped dependency nodes are projected onto executed jobs. Reusable workflows, ambiguous dynamic names, unavailable YAML, or invalid graphs fall back to timestamps. Inference walks backwards using the latest predecessor completion at or before job creation plus three seconds, constrained to finish before the current job starts.
 - Composition: mean queue, work, dispatch gap, and in-job wait within ≤p50, p40–60, p85–95, and ≥p90 E2E bands. Work includes job time outside steps. Matching wait intervals are unioned and clipped to job boundaries. Repeat `--wait-regex` to replace `(?i)(wait|slot|semaphore|lock)`.
 - Concurrency: job start/completion sweep, with overlaps on the same runner clipped. Idle time uses the requested observation window. Labels can overlap; their saturation times must not be summed. Configure capacity with repeated `--label-capacity LABEL=N`; otherwise capacity is the distinct observed runner count, explicitly labeled as inferred.
 - Host scope: `--host-label` limits concurrency and contention to jobs carrying every supplied label. `--label` scopes all reported metrics, and `--event`/`--workflow` scope reported metrics; the host sweep still includes every event and job label on that host within the selected repositories. Selecting one repository cannot reveal contention from repositories absent from the input.
@@ -48,3 +48,15 @@ Classes: `infra`, `flaky`, `code`, `superseded`, `unknown`. Regexes and classes 
 JSON uses `schemaVersion: 1`, camelCase field names, seconds for duration/queue/percentile fields, minutes only for `runnerMinutes`, hours for `saturationHours`, percent units for `*Percent`, and 0–1 fractions for concurrency distribution/idle fields. Missing percentiles are `null`, never zero. `runs[].halfBaselineP50Seconds` and `halfBaselineP90Seconds` give the half-latency targets for the current input window; comparing separate baseline and post-change windows remains necessary to establish improvement.
 
 Markdown is a short summary followed by timing, composition, concurrency, contention, and failure tables. Names are escaped for table safety. No synthetic test fixture contains production history.
+
+`--offline-cache` replays the existing raw API snapshot regardless of cache age,
+without authentication or network fallback. Cache misses remain explicit errors or
+collection warnings. Use the original repository scope, window and log budget to
+reproduce a historical report with updated analysis code.
+
+Generated `dynamic/` workflows have no repository YAML and use timestamp inference
+without requesting the contents API. File workflows are read at the recorded head
+SHA. Named matrix children can be resolved from their observed display names;
+unique matches, complete dependencies and integer `max-parallel` are required.
+Ambiguous names and reusable workflows retain inference. Exported matrix children
+share the earliest creation gap so later dispatch throttling is not counted twice.

@@ -63,6 +63,31 @@ fn cache_checks_key_and_corrupt_entries_are_misses() {
     assert_eq!(cache.get("other", false).unwrap(), None);
 }
 
+#[tokio::test]
+async fn offline_cache_reads_expired_snapshot_and_never_fetches_misses() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path().into()).unwrap();
+    cache
+        .put(&format!("{}/cached", server.uri()), "snapshot".into())
+        .unwrap();
+    let entry = std::fs::read_dir(dir.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    value["fetched"] = json!(0);
+    std::fs::write(entry, value.to_string()).unwrap();
+    let mut client = Client::new(server.uri(), String::new(), dir.path().into()).unwrap();
+    client.offline_cache();
+    assert_eq!(client.raw("/cached", false).await.unwrap(), "snapshot");
+    assert!(client.raw("/missing", false).await.is_err());
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
 #[test]
 fn api_job_conversion_round_trips_portable_trace() {
     let run: trace_build::Run =

@@ -212,6 +212,14 @@ pub async fn collect(
                 }
                 if let (Some(path), Some(sha)) = (&run.path, &run.head_sha) {
                     let path = path.split('@').next().unwrap_or(path);
+                    if path.starts_with("dynamic/") {
+                        warnings.push(
+                            "Generated workflow has no repository YAML; using timestamp inference."
+                                .into(),
+                        );
+                        jobs.extend(batch);
+                        continue;
+                    }
                     let url = format!("/repos/{repo}/contents/{path}?ref={sha}");
                     match workflow(client, &url).await {
                         Ok(source) => match trace_build::apply_workflow(&mut batch, &source) {

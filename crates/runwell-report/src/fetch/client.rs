@@ -15,6 +15,7 @@ pub struct Client {
     base: String,
     token: String,
     cache: Cache,
+    cached_only: bool,
     blocked_until: Option<tokio::time::Instant>,
 }
 
@@ -28,8 +29,14 @@ impl Client {
             base: base.trim_end_matches('/').into(),
             token,
             cache: Cache::new(cache_dir)?,
+            cached_only: false,
             blocked_until: None,
         })
+    }
+
+    /// Read the existing snapshot without authentication or network fallback.
+    pub fn offline_cache(&mut self) {
+        self.cached_only = true;
     }
 
     pub async fn raw(&mut self, path: &str, immutable: bool) -> Result<String, Error> {
@@ -48,8 +55,11 @@ impl Client {
         Fut: Future<Output = ()>,
     {
         let key = format!("{}{}", self.base, path);
-        if let Some(body) = self.cache.get(&key, immutable)? {
+        if let Some(body) = self.cache.get(&key, immutable || self.cached_only)? {
             return Ok(body);
+        }
+        if self.cached_only {
+            return Err(Error::Invalid("response missing from offline cache".into()));
         }
         for attempt in 0..6u32 {
             if let Some(until) = self.blocked_until.take() {

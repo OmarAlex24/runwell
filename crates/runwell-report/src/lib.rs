@@ -7,6 +7,7 @@ pub mod model;
 pub mod options;
 pub mod render;
 pub mod trace_build;
+mod workflow;
 
 pub use model::Report;
 pub use options::{Format, ReportArgs};
@@ -59,12 +60,23 @@ pub async fn execute(args: &ReportArgs) -> Result<String, Error> {
         resolved.until = Some(end.to_string());
         let mut client = fetch::Client::new(
             "https://api.github.com".into(),
-            fetch::token().await?,
+            if args.offline_cache {
+                String::new()
+            } else {
+                fetch::token().await?
+            },
             args.cache(),
         )?;
+        if args.offline_cache {
+            client.offline_cache();
+        }
         let collected =
             fetch::collect(&mut client, &args.repo, start, end, args.fetch_logs).await?;
-        (collected.jobs, collected.warnings)
+        let mut warnings = collected.warnings;
+        if args.offline_cache {
+            warnings.push("Replayed cached API snapshot; responses were not refreshed.".into());
+        }
+        (collected.jobs, warnings)
     };
     if let Some(path) = &args.export_trace {
         if args.from_trace.as_ref().is_some_and(|p| p == path) {

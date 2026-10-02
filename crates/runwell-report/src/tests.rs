@@ -6,6 +6,7 @@ use runwell_trace::{TraceJob, TraceStep};
 mod classification;
 mod fetching;
 mod metric;
+mod workflow;
 
 #[derive(Parser)]
 struct Cli {

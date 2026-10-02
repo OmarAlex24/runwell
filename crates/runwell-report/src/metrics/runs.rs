@@ -42,7 +42,7 @@ pub fn summarize(jobs: &[TraceJob], waits: &RegexSet, factors: &Factors) -> Vec<
         let Some(end) = active.iter().filter_map(|j| j.completed_at).max() else {
             continue;
         };
-        let graph = critical::graph(&active);
+        let graph = critical::executed_graph(&all, &active);
         let comp = critical::composition(&active, &graph, waits);
         let floor = bestcase::estimate(&active, &graph, factors, waits);
         let event = all[0].event.as_deref().unwrap_or("unknown");
