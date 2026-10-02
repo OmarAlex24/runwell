@@ -64,11 +64,12 @@ impl Report {
         if let Some(search) = &self.classic {
             let _ = writeln!(
                 out,
-                "\nClassic search: {} evaluated, {} rejected (infeasible or censored), bounds {:?}, p90 targets {:?}. Top {} per semaphore mode.\n",
+                "\nClassic search: {} evaluated, {} rejected (infeasible or censored), bounds {:?}, p90 targets {:?}, optional p50 targets {:?}. Top {} per semaphore mode.\n",
                 search.evaluated,
                 search.rejected,
                 search.max_runners_per_host,
                 search.target_p90_minutes,
+                search.target_p50_minutes,
                 search.top_per_mode
             );
             out.push_str("| Rank | Semaphore | Host × repo runners | Score | Repo | p50 | p90 | p99 | Queue |\n|---:|---|---|---:|---|---:|---:|---:|---:|\n");
@@ -76,13 +77,22 @@ impl Report {
             for a in &search.allocations {
                 let rank = ranks.entry(a.heavy_slots).or_insert(0);
                 *rank += 1;
+                let semaphore = (0..a.runners.len())
+                    .map(|h| {
+                        a.heavy_slots_per_host
+                            .get(h)
+                            .copied()
+                            .or(a.heavy_slots)
+                            .map_or_else(|| "off".into(), |s| s.to_string())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" / ");
                 for r in a.rows.iter().filter(|r| r.event == "pull_request") {
                     let _ = writeln!(
                         out,
                         "| {} | {} | {:?} | {:.3} | {} | {:.2} | {:.2} | {:.2} | {:.1}% |",
                         rank,
-                        a.heavy_slots
-                            .map_or_else(|| "off".into(), |s| s.to_string()),
+                        semaphore,
                         a.runners,
                         a.score,
                         escape(&r.repo),

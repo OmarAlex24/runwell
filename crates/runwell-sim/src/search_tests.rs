@@ -31,6 +31,24 @@ fn bounded_search_is_exhaustive_ranked_and_deterministic_across_worker_counts() 
         assert!(mode.windows(2).all(|p| p[0].score <= p[1].score));
     }
 }
+
+#[test]
+fn median_target_prevents_a_p90_only_search_from_claiming_the_latency_goal() {
+    let config = Config::default();
+    let trace = PreparedTrace::new(&[job(1, "work", 0, 0, 60, &[])], &config).unwrap();
+    let mut options = SearchOptions {
+        max_runners_per_host: vec![1],
+        target_p90_minutes: vec![2.0],
+        ..Default::default()
+    };
+    let p90_only = search_allocations(&trace, &options).unwrap();
+    assert_eq!(p90_only.allocations[0].score, 0.5);
+    options.target_p50_minutes = vec![0.5];
+    let both = search_allocations(&trace, &options).unwrap();
+    assert_eq!(both.allocations[0].score, 2.0);
+    options.target_p50_minutes = vec![0.0];
+    assert!(search_allocations(&trace, &options).is_err());
+}
 #[test]
 fn capacity_increase_wakes_queued_work_and_equivalence_includes_history() {
     let trace = vec![job(1, "a", 0, 0, 20, &[]), job(2, "b", 0, 30, 50, &[])];

@@ -27,6 +27,15 @@ pub(crate) fn read<'a>(
     diagnostics: &mut Diagnostics,
 ) -> Result<Vec<Observation<'a>>, Error> {
     let mut observations = Vec::new();
+    let mut first_attempts = BTreeMap::new();
+    for raw in trace {
+        first_attempts
+            .entry(execution_key(raw))
+            .and_modify(|attempt: &mut u32| {
+                *attempt = (*attempt).min(raw.run_attempt);
+            })
+            .or_insert(raw.run_attempt);
+    }
     for raw in trace {
         let unstarted = raw.conclusion.as_deref() == Some("cancelled")
             && raw.runner_name.as_deref().is_none_or(str::is_empty)
@@ -56,7 +65,10 @@ pub(crate) fn read<'a>(
         if unstarted {
             start = start.min(end).max(arrival);
         }
-        if !skipped && !unstarted && (end < start || start < arrival) {
+        let repeated = first_attempts
+            .get(&execution_key(raw))
+            .is_some_and(|&attempt| attempt < raw.run_attempt);
+        if !skipped && !unstarted && (end < start || (start < arrival && !repeated)) {
             diagnostics.excluded_jobs += 1;
             continue;
         }
@@ -112,7 +124,8 @@ pub(crate) fn read<'a>(
         return Err(Error::Invalid("trace has no usable job timestamps".into()));
     }
     // GitHub rerun snapshots can include earlier successful executions. An exact
-    // identity/timestamp match across attempts is reused, never counted twice.
+    // execution/timestamp match across attempts is reused, never counted twice.
+    // GitHub can assign a new job ID to the snapshot of an old execution.
     let mut identities = BTreeMap::new();
     let mut order: Vec<_> = (0..observations.len()).collect();
     order.sort_by_key(|&i| observations[i].raw.run_attempt);
@@ -122,15 +135,7 @@ pub(crate) fn read<'a>(
             continue;
         }
         let raw = o.raw;
-        let key = (
-            &raw.repo,
-            raw.run_id,
-            &raw.job_name,
-            raw.job_id,
-            raw.started_at,
-            raw.completed_at,
-            &raw.runner_name,
-        );
+        let key = execution_key(raw);
         if let Some(&(attempt, original)) = identities.get(&key) {
             if attempt < raw.run_attempt {
                 observations[i].reuse = Some(original);
@@ -156,6 +161,26 @@ pub(crate) fn read<'a>(
         }
     }
     Ok(observations)
+}
+
+type ExecutionKey<'a> = (
+    &'a str,
+    u64,
+    &'a str,
+    Option<jiff::Timestamp>,
+    Option<jiff::Timestamp>,
+    Option<&'a str>,
+);
+
+fn execution_key(raw: &TraceJob) -> ExecutionKey<'_> {
+    (
+        &raw.repo,
+        raw.run_id,
+        &raw.job_name,
+        raw.started_at,
+        raw.completed_at,
+        raw.runner_name.as_deref(),
+    )
 }
 
 fn active_intervals(start: f64, end: f64, waits: &[(f64, f64)]) -> Vec<(f64, f64)> {

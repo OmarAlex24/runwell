@@ -9,6 +9,8 @@ pub struct SearchOptions {
     pub max_runners_per_host: Vec<usize>,
     /// p90 target minutes in report repository order. Empty uses observed p90 / 2.
     pub target_p90_minutes: Vec<f64>,
+    /// Optional p50 targets in the same repository order; empty ranks p90 only.
+    pub target_p50_minutes: Vec<f64>,
     /// Number retained for each semaphore mode.
     pub top_per_mode: usize,
     /// Heavy slot count for the enabled mode; disabled mode is always searched too.
@@ -21,6 +23,7 @@ impl Default for SearchOptions {
         Self {
             max_runners_per_host: Vec::new(),
             target_p90_minutes: Vec::new(),
+            target_p50_minutes: Vec::new(),
             top_per_mode: 5,
             heavy_slots: 3,
             workers: 4,
@@ -34,7 +37,9 @@ pub struct Allocation {
     pub runners: Vec<Vec<usize>>,
     /// Host-local heavy slots; absent disables the semaphore.
     pub heavy_slots: Option<usize>,
-    /// max(repository p90 / its target); lower is better.
+    /// Per-host overrides for the enabled semaphore mode.
+    pub heavy_slots_per_host: Vec<usize>,
+    /// Maximum latency/target ratio over repositories and requested percentiles.
     pub score: f64,
     /// Full repository/event metrics for this allocation.
     pub rows: Vec<Row>,
@@ -50,6 +55,8 @@ pub struct SearchReport {
     pub max_runners_per_host: Vec<usize>,
     /// Objective denominators, in report repository order.
     pub target_p90_minutes: Vec<f64>,
+    /// Optional median targets included in the ranking objective.
+    pub target_p50_minutes: Vec<f64>,
     /// Retained count per semaphore mode.
     pub top_per_mode: usize,
     /// Disabled-sem top results, then enabled-sem top results.
@@ -123,6 +130,17 @@ pub fn search_allocations(
             "positive PR p90 targets are required for every repository".into(),
         ));
     }
+    if !options.target_p50_minutes.is_empty()
+        && (options.target_p50_minutes.len() != repos
+            || options
+                .target_p50_minutes
+                .iter()
+                .any(|t| !t.is_finite() || *t <= 0.0))
+    {
+        return Err(Error::Invalid(
+            "positive PR p50 targets are required for every repository".into(),
+        ));
+    }
     let candidates = allocations(&bounds, repos)?;
     let workers = options.workers.min(candidates.len()).max(1);
     let partials = std::thread::scope(|scope| {
@@ -141,6 +159,9 @@ pub fn search_allocations(
                     for (mode, slots) in [None, Some(options.heavy_slots)].into_iter().enumerate() {
                         let mut config = trace.config.clone();
                         config.heavy_slots = slots;
+                        if slots.is_none() {
+                            config.heavy_slots_per_host.clear();
+                        }
                         config.semaphore_history = false;
                         let Ok(outcome) = engine::replay_allocation(
                             trace,
@@ -167,14 +188,20 @@ pub fn search_allocations(
                             rejected += 1;
                             continue;
                         }
-                        let score = pr
-                            .iter()
-                            .enumerate()
-                            .map(|(r, row)| row.metrics.p90_minutes / targets[r])
-                            .fold(0.0, f64::max);
+                        let score =
+                            pr.iter()
+                                .enumerate()
+                                .map(|(r, row)| {
+                                    let p90 = row.metrics.p90_minutes / targets[r];
+                                    options.target_p50_minutes.get(r).map_or(p90, |target| {
+                                        p90.max(row.metrics.p50_minutes / target)
+                                    })
+                                })
+                                .fold(0.0, f64::max);
                         best[mode].push(Allocation {
                             runners: runners.clone(),
                             heavy_slots: slots,
+                            heavy_slots_per_host: config.heavy_slots_per_host.clone(),
                             score,
                             rows: report.rows,
                         });
@@ -212,6 +239,7 @@ pub fn search_allocations(
         rejected,
         max_runners_per_host: bounds,
         target_p90_minutes: targets,
+        target_p50_minutes: options.target_p50_minutes.clone(),
         top_per_mode: options.top_per_mode,
         allocations: winners,
     })

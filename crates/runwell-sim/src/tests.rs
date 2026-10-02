@@ -277,6 +277,8 @@ fn arrivals_and_completions_change_speed_of_already_running_work() {
 fn memory_overcommit_adds_work_penalty_and_failure_exposure() {
     let trace = vec![job(1, "heavy", 0, 0, 10, &[])];
     let mut c = config(1);
+    // Keep fixed work here to isolate the forward memory penalty.
+    c.preserve_work_variation = false;
     c.hosts[0].memory_gib = 1.0;
     c.default_demand.memory_gib = 2.0;
     c.default_demand.heavy = true;

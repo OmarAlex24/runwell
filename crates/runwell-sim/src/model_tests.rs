@@ -98,3 +98,43 @@ fn named_pools_route_jobs_before_repository_fallback() {
     assert_ne!(p.jobs[0].pool, p.jobs[1].pool);
     assert_eq!(p.pool_limits, [1, 6]);
 }
+
+#[test]
+fn rerun_snapshot_with_new_job_id_reuses_execution_before_attempt_creation() {
+    let mut first = job(1, "build", 0, 0, 10, &[]);
+    first.runner_name = Some("runner".into());
+    first.job_id = Some(10);
+    let mut repeated = first.clone();
+    repeated.run_attempt = 2;
+    repeated.job_id = Some(20);
+    repeated.run_created_at = Some(jiff::Timestamp::from_second(30).unwrap());
+    repeated.created_at = repeated.run_created_at;
+    let mut next = job(1, "test", 30, 40, 50, &["build"]);
+    next.run_attempt = 2;
+    let config = Config::default();
+    let prepared = PreparedTrace::new(&[first, repeated, next], &config).unwrap();
+    assert_eq!(prepared.diagnostics.reused_executions, 1);
+    assert_eq!(prepared.diagnostics.excluded_jobs, 0);
+    assert_eq!(prepared.jobs[1].work, 0.0);
+    let outcome = crate::engine::replay(&prepared, &config, Policy::Baseline, 1).unwrap();
+    assert_eq!(outcome.timings[2].end, 40.0);
+}
+
+#[test]
+fn inverse_service_work_preserves_variation_under_the_observed_load() {
+    let mut trace = vec![job(1, "variable", 0, 0, 10, &[])];
+    for i in 0..5 {
+        let name = if i < 2 { "variable" } else { "background" };
+        let end = if i == 0 { 120 } else { 140 };
+        trace.push(job(i + 2, name, 100, 100, end, &[]));
+    }
+    let config = Config {
+        low_concurrency: 1.0,
+        high_concurrency: 4.0,
+        ..Default::default()
+    };
+    let prepared = PreparedTrace::new(&trace, &config).unwrap();
+    let outcome = crate::engine::replay(&prepared, &config, Policy::Baseline, 1).unwrap();
+    assert!((outcome.timings[1].end - 120.0).abs() < 1e-6);
+    assert!((outcome.timings[2].end - 140.0).abs() < 1e-6);
+}

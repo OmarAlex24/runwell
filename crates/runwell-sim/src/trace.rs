@@ -92,6 +92,11 @@ impl PreparedTrace {
         };
         let mut observations = crate::observation::read(trace, config, &mut diagnostics)?;
         let model = crate::model::fit(&mut observations, config);
+        let intrinsic = if config.preserve_work_variation && !config.observed_work {
+            crate::intrinsic::estimate(&observations, &model, config)
+        } else {
+            Vec::new()
+        };
         let repo_names: Vec<_> = observations
             .iter()
             .map(|o| o.raw.repo.clone())
@@ -150,7 +155,9 @@ impl PreparedTrace {
             let median = model
                 .medians
                 .get(&(o.raw.repo.clone(), o.raw.job_name.clone()));
-            let work = if config.observed_work
+            let work = if config.preserve_work_variation && !config.observed_work {
+                intrinsic[i]
+            } else if config.observed_work
                 || o.net == 0.0
                 || !o.local
                 || o.concurrency <= config.low_concurrency
@@ -270,7 +277,7 @@ impl PreparedTrace {
             diagnostics.warnings.push("Dependencies inferred from timestamps: parallel branches, dispatch delays, matrix limits and workflow revisions are not fully identifiable.".into());
         }
         if diagnostics.unsupported_intrinsic_jobs > 0 {
-            diagnostics.warnings.push("Some job names lack low-concurrency successes; their observed durations are retained, potentially including contention.".into());
+            diagnostics.warnings.push("Some job names lack low-concurrency successes; CPU decontending is unsupported for these classes, so their work may retain contention.".into());
         }
         diagnostics.warnings.push("Heavy failure rates are all-cause proxies, not identified infrastructure failures; simulated failures do not trigger retries or change the recorded DAG.".into());
         diagnostics.warnings.push("Execution intervals alone do not identify listener availability or GitHub dispatch eligibility/order. Optional availability input constrains dispatch but cannot recover upstream eligibility. Older workflow revisions retain inferred dependencies; cancellation groups use branches when PR IDs are absent.".into());

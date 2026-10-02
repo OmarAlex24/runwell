@@ -5,6 +5,7 @@ pub mod availability;
 pub mod config;
 pub mod contention;
 mod engine;
+mod intrinsic;
 mod model;
 mod observation;
 pub use model::ClassModel;
@@ -170,3 +171,6 @@ mod availability_tests;
 
 #[cfg(test)]
 mod production_tests;
+
+#[cfg(test)]
+mod host_tests;

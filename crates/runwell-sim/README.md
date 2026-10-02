@@ -171,8 +171,9 @@ Missing or impossible timestamps are counted and excluded. Skipped jobs consume
 zero work. A cancelled record with no runner and no steps consumes zero work and
 retains its observed terminal time. An identical execution repeated in a later
 attempt snapshot depends on the original execution, without running again.
-Exact execution identity includes repository, run, name, optional job ID, runner
-and start/end timestamps; different attempts are required for reuse.
+Execution identity includes repository, run, name, runner and start/end
+timestamps; different attempts are required for reuse. Snapshot job IDs can
+change, and reused executions may predate the later attempt creation clock.
 
 Observed concurrency is the time-weighted integral of overlapping local runner
 active intervals, after removing recorded semaphore waits, nonexecuting
@@ -181,9 +182,17 @@ not contribute CPU demand. Concurrency is averaged over each job's active work
 intervals; `exclude_semaphore_waits_from_contention = false` reproduces the older
 runner-occupancy fit for diagnostic ablations.
 Successful low-concurrency durations establish a median for each repository/job
-name. Low-concurrency jobs retain their own observed work; contended successes use
-the name median. Failed or interrupted jobs retain their observed truncated work.
-Names lacking low-load successes retain observed work and are counted as unsupported.
+name to fit slowdown. Service work is then estimated by integrating the fitted
+speed over each observed active execution interval, using reference-host aggregate
+CPU demand and configured RAM priors. Forward replay applies the same pressure
+curve to that work under each new schedule. This preserves per-execution input/cache
+variation and avoids applying contention twice to interrupted jobs. It does not
+preserve observed queue waits or fit latency targets. Names without low-load
+successes have a unit CPU curve and are counted as unsupported.
+
+`preserve_work_variation = false` retains the legacy diagnostic estimator: contended
+successes use the low-load name median; low-load and interrupted executions keep
+observed work. `observed_work = true` bypasses both decontending and forward slowdown.
 
 By default `fit_by_class = true` fits each repository/workflow job class separately;
 `false` retains pooled fitting for diagnostic ablations. The CPU curve uses medians of successful observed/intrinsic duration ratios by
@@ -279,3 +288,14 @@ For timing, build release first, then time the binary with `--policy all`; inclu
 trace parsing, model fitting and all scenarios in the measurement. Runtime is
 proportional to events and the ready/running sets, with an event heap and indexed
 DAG edges; observed concurrency queries use a prefix integral and binary search.
+
+`heavy_slots_per_host = [2, 1]` overrides the global `heavy_slots` in host order.
+Missing entries inherit the global limit. The enabled semaphore mode in allocation
+search retains these overrides; the disabled mode clears every host's semaphore.
+Per-host pool sizes can be supplied as `runner_history` changes at the start of the
+trace; allocation search replaces those installed sizes with each candidate split.
+
+Add `--target-p50 8,6` to the classic search to include median goals alongside the
+p90 goals. Ranking then minimizes the worst ratio across both requested percentiles
+and every repository. Without this option the objective remains p90 only; passing
+that objective does not imply the medians meet a latency goal.

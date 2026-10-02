@@ -24,6 +24,8 @@ fn production_keeps_a_wakeup_consumed_within_event_tolerance() {
         },
         memory_threshold: 0.5,
         memory_penalty: 1.99999999,
+        // This regression injects a forward penalty into fixed synthetic work.
+        preserve_work_variation: false,
         ..Default::default()
     };
     let trace = PreparedTrace::new(&trace, &config).unwrap();

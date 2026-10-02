@@ -52,6 +52,9 @@ pub struct Simulate {
     /// Repository-ordered p90 targets in minutes; defaults to observed p90 / 2.
     #[arg(long, value_delimiter = ',')]
     target_p90: Vec<f64>,
+    /// Optional repository-ordered p50 targets in minutes, also included in classic ranking.
+    #[arg(long, value_delimiter = ',')]
+    target_p50: Vec<f64>,
 }
 
 impl Simulate {
@@ -129,6 +132,7 @@ impl Simulate {
                 &runwell_sim::search::SearchOptions {
                     max_runners_per_host: self.classic_max_runners,
                     target_p90_minutes: self.target_p90,
+                    target_p50_minutes: self.target_p50,
                     ..Default::default()
                 },
             )?);

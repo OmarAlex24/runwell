@@ -85,7 +85,7 @@ impl Engine<'_> {
                     self.trace.jobs[i].observed_semaphore,
                     self.config.semaphore_history,
                 )
-                && self.config.heavy_slots.is_some()
+                && self.config.heavy_slots_on(h).is_some()
             {
                 self.held.push(i);
                 self.start_held()?;
@@ -96,12 +96,13 @@ impl Engine<'_> {
         Ok(())
     }
     pub(super) fn start_held(&mut self) -> Result<(), Error> {
-        let Some(limit) = self.config.heavy_slots else {
-            return Ok(());
-        };
         let held = std::mem::take(&mut self.held);
         for i in held {
             let Some(h) = self.timings[i].host else {
+                continue;
+            };
+            let Some(limit) = self.config.heavy_slots_on(h) else {
+                self.start(i)?;
                 continue;
             };
             if self.host_offline[h] > 0 {

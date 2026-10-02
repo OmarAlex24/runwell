@@ -21,6 +21,8 @@ pub struct Config {
     pub semaphore_steps: Vec<String>,
     /// Baseline semaphore slots per host; absent disables the semaphore.
     pub heavy_slots: Option<usize>,
+    /// Optional per-host limits, in host order; the global limit remains the fallback.
+    pub heavy_slots_per_host: Vec<usize>,
     /// Baseline semaphore timeout before fail-open.
     pub semaphore_timeout_seconds: f64,
     /// CPU reservation multiplier.
@@ -59,6 +61,9 @@ pub struct Config {
     pub cancel_grace_seconds: f64,
     /// Diagnostic only: retain measured net work and disable modeled slowdown.
     pub observed_work: bool,
+    /// Preserve per-execution variation by integrating fitted speed over observed load.
+    /// False retains the legacy low-load median work estimate for diagnostics.
+    pub preserve_work_variation: bool,
     /// Baseline applies the semaphore only where recorded steps show it existed.
     pub semaphore_history: bool,
     /// Exclude recorded semaphore wait intervals from CPU contention fitting.
@@ -89,6 +94,7 @@ impl Default for Config {
             contention_label: None,
             semaphore_steps: Vec::new(),
             heavy_slots: None,
+            heavy_slots_per_host: Vec::new(),
             semaphore_timeout_seconds: 900.0,
             cpu_overcommit: 1.0,
             memory_overcommit: 1.0,
@@ -107,6 +113,7 @@ impl Default for Config {
             cancel_on_dispatch: true,
             cancel_grace_seconds: 0.0,
             observed_work: false,
+            preserve_work_variation: true,
             semaphore_history: true,
             exclude_semaphore_waits_from_contention: true,
             report_workflows: Vec::new(),
@@ -227,6 +234,8 @@ impl Config {
             || self.memory_penalty < 1.0
             || self.high_concurrency <= self.low_concurrency
             || self.heavy_slots == Some(0)
+            || self.heavy_slots_per_host.len() > self.hosts.len()
+            || self.heavy_slots_per_host.contains(&0)
             || self.pools.iter().any(|p| p.runners == 0)
         {
             return Err(Error::Invalid(
@@ -272,6 +281,12 @@ impl Config {
             .max_by_key(|j| j.repo.is_some())
             .map(|j| j.demand.clone())
             .unwrap_or_else(|| self.default_demand.clone())
+    }
+    pub(crate) fn heavy_slots_on(&self, host: usize) -> Option<usize> {
+        self.heavy_slots_per_host
+            .get(host)
+            .copied()
+            .or(self.heavy_slots)
     }
 }
 
