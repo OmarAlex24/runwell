@@ -1,26 +1,16 @@
 //! Paginated GitHub collection with bounded retries and server-directed backoff.
 use crate::{
     Error,
-    cache::Cache,
     trace_build::{self, Run},
 };
 use base64::Engine;
 use jiff::Timestamp;
 use runwell_trace::TraceJob;
 use serde_json::Value;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-    time::Duration,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub struct Client {
-    http: reqwest::Client,
-    base: String,
-    token: String,
-    cache: Cache,
-    blocked_until: Option<tokio::time::Instant>,
-}
+mod client;
+pub use client::Client;
 
 pub async fn token() -> Result<String, Error> {
     for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
@@ -48,80 +38,6 @@ pub async fn token() -> Result<String, Error> {
 }
 
 impl Client {
-    pub fn new(base: String, token: String, cache_dir: PathBuf) -> Result<Self, Error> {
-        Ok(Self {
-            http: reqwest::Client::builder()
-                .user_agent("runwell-report/0.1")
-                .timeout(Duration::from_secs(120))
-                .build()?,
-            base: base.trim_end_matches('/').into(),
-            token,
-            cache: Cache::new(cache_dir)?,
-            blocked_until: None,
-        })
-    }
-
-    pub async fn raw(&mut self, path: &str, immutable: bool) -> Result<String, Error> {
-        let key = format!("{}{}", self.base, path);
-        if let Some(body) = self.cache.get(&key, immutable)? {
-            return Ok(body);
-        }
-        for attempt in 0..6u32 {
-            if let Some(until) = self.blocked_until.take() {
-                tokio::time::sleep_until(until).await;
-            }
-            let response = self
-                .http
-                .get(&key)
-                .bearer_auth(&self.token)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2026-03-10")
-                .send()
-                .await?;
-            let status = response.status();
-            let headers = response.headers();
-            let remaining = headers
-                .get("x-ratelimit-remaining")
-                .and_then(|v| v.to_str().ok());
-            let retry = headers
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok());
-            let reset = headers
-                .get("x-ratelimit-reset")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<i64>().ok());
-            let reset_delay =
-                reset.map(|r| r.saturating_sub(Timestamp::now().as_second()).max(1) as u64);
-            let exhausted = remaining == Some("0");
-            let body = response.text().await?;
-            let throttled = status.as_u16() == 429
-                || (status.as_u16() == 403
-                    && (retry.is_some()
-                        || exhausted
-                        || body.to_ascii_lowercase().contains("rate limit")));
-            let delay = retry
-                .or_else(|| exhausted.then_some(reset_delay.unwrap_or(60)))
-                .unwrap_or(60 * (1u64 << attempt));
-            if throttled || exhausted {
-                self.blocked_until = Some(tokio::time::Instant::now() + Duration::from_secs(delay));
-            }
-            if throttled && attempt < 5 {
-                eprintln!(
-                    "GitHub rate limit: retrying in {delay} seconds (attempt {}).",
-                    attempt + 1
-                );
-                continue;
-            }
-            if !status.is_success() {
-                return Err(Error::Http(status.as_u16()));
-            }
-            self.cache.put(&key, body.clone())?;
-            return Ok(body);
-        }
-        Err(Error::Invalid("rate-limit retry budget exhausted".into()))
-    }
-
     pub async fn json(&mut self, path: &str, immutable: bool) -> Result<Value, Error> {
         Ok(serde_json::from_str(&self.raw(path, immutable).await?)?)
     }

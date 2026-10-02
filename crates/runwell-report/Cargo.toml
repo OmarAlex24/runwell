@@ -23,6 +23,8 @@ regex = "=1.13.1"
 serde_yaml = "=0.9.34"
 base64 = "=0.22.1"
 humantime = "=2.4.0"
+fastrand.workspace = true
+httpdate.workspace = true
 
 [dev-dependencies]
 wiremock = "=0.6.5"
