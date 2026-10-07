@@ -37,4 +37,4 @@ rustix.workspace = true
 wiremock = "=0.6.5"
 tempfile = "=3.27.0"
 serde_json.workspace = true
-base64 = "=0.22.1"
+base64 = "=0.23.1"
