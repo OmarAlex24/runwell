@@ -17,7 +17,9 @@ impl Engine<'_> {
                 self.cancelled_runs[event.job] = true;
                 self.timings[i].cancelled = true;
                 let active = self.running.contains(&i);
-                if !active {
+                if self.held.contains(&i) {
+                    self.timings[i].semaphore_wait += self.now - self.timings[i].held_at;
+                } else if !active {
                     self.timings[i].ready = self.now;
                     self.timings[i].start = self.now;
                 }

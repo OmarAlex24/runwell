@@ -11,6 +11,7 @@ pub(crate) struct Observation<'a> {
     pub net: f64,
     pub slot_wait: f64,
     pub active: Vec<(f64, f64)>,
+    pub semaphore: Option<(f64, f64)>,
     pub concurrency: f64,
     pub local: bool,
     pub demand: Demand,
@@ -82,6 +83,7 @@ pub(crate) fn read<'a>(
         let waits: Vec<_> = raw
             .steps
             .iter()
+            .filter(|s| s.conclusion.as_deref() != Some("skipped"))
             .filter(|s| config.semaphore_steps.iter().any(|p| s.name.contains(p)))
             .filter_map(|s| {
                 Some((
@@ -92,6 +94,37 @@ pub(crate) fn read<'a>(
             .filter(|(a, b)| b > a)
             .collect();
         let active = active_intervals(start, end, &waits);
+        let acquires: Vec<_> = raw
+            .steps
+            .iter()
+            .filter(|s| {
+                s.conclusion.as_deref() != Some("skipped")
+                    && config.semaphore_steps.iter().any(|p| s.name.contains(p))
+            })
+            .collect();
+        if acquires.len() > 1 {
+            return Err(Error::Invalid(
+                "multiple semaphore acquisitions per job are unsupported".into(),
+            ));
+        }
+        let semaphore = acquires.first().and_then(|s| s.started_at).map(|at| {
+            let acquire = seconds(at).clamp(start, end.max(start));
+            let release = raw
+                .steps
+                .iter()
+                .filter(|s| {
+                    s.conclusion.as_deref() != Some("skipped")
+                        && config
+                            .semaphore_release_steps
+                            .iter()
+                            .any(|p| s.name.contains(p))
+                })
+                .filter_map(|s| s.completed_at.map(seconds))
+                .filter(|&at| at >= acquire)
+                .min_by(f64::total_cmp)
+                .unwrap_or(end);
+            (acquire, release.clamp(acquire, end.max(acquire)))
+        });
         let net = active.iter().map(|(a, b)| b - a).sum::<f64>();
         let waits = (end - start - net).max(0.0);
         let local = config
@@ -113,6 +146,7 @@ pub(crate) fn read<'a>(
             },
             slot_wait: waits.min((end - start).max(0.0)),
             active,
+            semaphore,
             concurrency: 0.0,
             local,
             demand: config.demand(&raw.repo, &raw.job_name),
@@ -155,12 +189,43 @@ pub(crate) fn read<'a>(
         o.created -= origin;
         o.start -= origin;
         o.end -= origin;
+        if let Some((a, b)) = &mut o.semaphore {
+            *a -= origin;
+            *b -= origin;
+        }
         for (a, b) in &mut o.active {
             *a -= origin;
             *b -= origin;
         }
     }
     Ok(observations)
+}
+
+impl Observation<'_> {
+    /// Work before acquisition, inside the slot, and after release. Integrate
+    /// each phase against the same speed curve; observed waits are already absent.
+    pub fn phase_work(&self, integral: impl Fn(f64, f64) -> f64) -> [f64; 3] {
+        if self.net == 0.0 {
+            return [0.0; 3];
+        }
+        let (acquire, release) = self.semaphore.unwrap_or((self.start, self.end));
+        let mut work = [0.0; 3];
+        for &(a, b) in &self.active {
+            for (i, (start, end)) in [
+                (a, b.min(acquire)),
+                (a.max(acquire), b.min(release)),
+                (a.max(release), b),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if end > start {
+                    work[i] += integral(start, end).max(0.0);
+                }
+            }
+        }
+        work
+    }
 }
 
 type ExecutionKey<'a> = (

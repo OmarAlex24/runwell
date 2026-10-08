@@ -10,7 +10,7 @@ struct Segment {
 /// Integrating speed over observed execution retains cache/input variation and
 /// decontends interrupted work too. No queue latency or target quantile enters
 /// this estimate. The reference host and RAM priors remain model assumptions.
-pub(crate) fn estimate(obs: &[Observation<'_>], model: &Model, config: &Config) -> Vec<f64> {
+pub(crate) fn estimate(obs: &[Observation<'_>], model: &Model, config: &Config) -> Vec<[f64; 3]> {
     let mut events = Vec::new();
     for o in obs.iter().filter(|o| o.local && o.net > 0.0) {
         for &(a, b) in &o.active {
@@ -59,14 +59,10 @@ pub(crate) fn estimate(obs: &[Observation<'_>], model: &Model, config: &Config) 
         .zip(&model.class_ids)
         .map(|(o, &class)| {
             if !o.local || o.net == 0.0 {
-                return o.net;
+                return [0.0, o.net, 0.0];
             }
             let timeline = &timelines[class];
-            o.active
-                .iter()
-                .map(|&(a, b)| integral(timeline, b) - integral(timeline, a))
-                .sum::<f64>()
-                .max(0.0)
+            o.phase_work(|a, b| integral(timeline, b) - integral(timeline, a))
         })
         .collect()
 }

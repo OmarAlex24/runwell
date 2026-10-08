@@ -8,6 +8,7 @@ derive_cpu_demand = true
 heavy_slots = 3
 semaphore_timeout_seconds = 900.0
 semaphore_steps = ["Acquire heavy slot"]
+semaphore_release_steps = ["Release heavy slot"]
 # Set contention_label to your local runner label when the trace spans hosts.
 # Jobs outside that label retain external queue/work, without using local capacity.
 

@@ -116,8 +116,10 @@ fn semaphore_holds_runner_and_fail_open_does_not_take_a_slot() {
     c.semaphore_timeout_seconds = 30.0;
     let p = PreparedTrace::new(&trace, &c).unwrap();
     let o = engine::replay(&p, &c, Policy::Baseline, 1).unwrap();
-    assert_eq!(o.timings[1].start, 30.0);
-    assert_eq!(o.timings[2].start, 80.0);
+    assert_eq!(o.timings[1].start, 0.0);
+    assert_eq!(o.timings[1].semaphore_wait, 30.0);
+    assert_eq!(o.timings[2].start, 50.0);
+    assert_eq!(o.timings[2].semaphore_wait, 30.0);
     assert_eq!(o.fail_opens, 2);
 }
 #[test]
@@ -133,7 +135,8 @@ fn semaphore_completion_wins_over_timeout_at_the_same_instant() {
     c.semaphore_timeout_seconds = 30.0;
     let p = PreparedTrace::new(&trace, &c).unwrap();
     let o = engine::replay(&p, &c, Policy::Baseline, 1).unwrap();
-    assert_eq!(o.timings[1].start, 30.0);
+    assert_eq!(o.timings[1].start, 0.0);
+    assert_eq!(o.timings[1].semaphore_wait, 30.0);
     assert_eq!(o.fail_opens, 0);
 }
 #[test]

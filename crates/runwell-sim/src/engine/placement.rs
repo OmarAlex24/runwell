@@ -69,7 +69,7 @@ impl Engine<'_> {
                 self.matrix_active[group] += 1;
             }
             self.timings[i].host = Some(h);
-            self.timings[i].held_at = self.now;
+            self.timings[i].start = self.now;
             if self.use_runners {
                 let pool = self.trace.jobs[i].pool;
                 self.timings[i].runner = Some(
@@ -87,11 +87,12 @@ impl Engine<'_> {
                 )
                 && self.config.heavy_slots_on(h).is_some()
             {
-                self.held.push(i);
-                self.start_held()?;
+                self.timings[i].phase = Phase::Before;
+                self.timings[i].remaining = self.trace.jobs[i].semaphore_work[0];
             } else {
-                self.start(i)?;
+                self.timings[i].remaining = self.trace.jobs[i].work;
             }
+            self.start(i)?;
         }
         Ok(())
     }
@@ -105,7 +106,10 @@ impl Engine<'_> {
                 self.start(i)?;
                 continue;
             };
-            if self.host_offline[h] > 0 {
+            if self.host_offline[h] > 0
+                || (self.config.semaphore_poll_seconds > 0.0
+                    && self.now + EPS < self.timings[i].poll_at)
+            {
                 self.held.push(i);
                 continue;
             }
@@ -115,7 +119,15 @@ impl Engine<'_> {
                 self.now - self.timings[i].held_at + EPS,
                 self.config.semaphore_timeout_seconds,
             ) {
-                SemaphoreDecision::Wait => self.held.push(i),
+                SemaphoreDecision::Wait => {
+                    let deadline = self.timings[i].held_at + self.config.semaphore_timeout_seconds;
+                    self.timings[i].poll_at = if self.config.semaphore_poll_seconds > 0.0 {
+                        (self.now + self.config.semaphore_poll_seconds).min(deadline)
+                    } else {
+                        deadline
+                    };
+                    self.held.push(i);
+                }
                 decision => {
                     if decision == SemaphoreDecision::Acquire {
                         self.slots[h] += 1;
@@ -123,6 +135,9 @@ impl Engine<'_> {
                     } else {
                         self.fail_opens += 1;
                     }
+                    self.timings[i].semaphore_wait += self.now - self.timings[i].held_at;
+                    self.timings[i].phase = Phase::Protected;
+                    self.timings[i].remaining = self.trace.jobs[i].semaphore_work[1];
                     self.start(i)?;
                 }
             }
@@ -131,8 +146,6 @@ impl Engine<'_> {
     }
     pub(super) fn start(&mut self, i: usize) -> Result<(), Error> {
         let t = &mut self.timings[i];
-        t.start = self.now;
-        t.remaining = self.trace.jobs[i].work;
         if let Some(h) = t.host {
             let r = self.trace.jobs[i].demand.resources();
             self.nodes[h].reserved.cpu_slots = self.nodes[h]

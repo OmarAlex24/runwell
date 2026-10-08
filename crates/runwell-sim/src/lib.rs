@@ -174,3 +174,6 @@ mod production_tests;
 
 #[cfg(test)]
 mod host_tests;
+
+#[cfg(test)]
+mod semaphore_tests;

@@ -147,6 +147,8 @@ impl Report {
                 "cancel_in_progress": config.cancel_in_progress, "cancel_grace_seconds": config.cancel_grace_seconds,
                 "cancel_on_dispatch": config.cancel_on_dispatch,
                 "semaphore_history": config.semaphore_history, "observed_work": config.observed_work,
+                "semaphore_release_steps_configured": !config.semaphore_release_steps.is_empty(),
+                "semaphore_poll_seconds": config.semaphore_poll_seconds,
                 "preserve_work_variation": config.preserve_work_variation,
                 "exclude_semaphore_waits_from_contention": config.exclude_semaphore_waits_from_contention,
                 "overcommit_sweep": config.overcommit_sweep, "runner_history_changes": config.runner_history.len(),
@@ -196,7 +198,7 @@ impl Report {
                     let mut cursor = Some(last);
                     while let Some(i) = cursor {
                         let t = &outcome.timings[i];
-                        queue += (t.start - t.ready.max(run.arrival)).max(0.0);
+                        queue += (t.start - t.ready.max(run.arrival)).max(0.0) + t.semaphore_wait;
                         cursor = trace.jobs[i].needs.iter().copied().max_by(|&a, &b| {
                             outcome.timings[a]
                                 .end

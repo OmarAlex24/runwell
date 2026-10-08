@@ -16,6 +16,7 @@ pub(crate) struct Job {
     pub needs: Vec<usize>,
     pub delay: f64,
     pub work: f64,
+    pub semaphore_work: [f64; 3],
     pub path: f64,
     pub external_queue: f64,
     pub matrix_group: Option<usize>,
@@ -156,7 +157,7 @@ impl PreparedTrace {
                 .medians
                 .get(&(o.raw.repo.clone(), o.raw.job_name.clone()));
             let work = if config.preserve_work_variation && !config.observed_work {
-                intrinsic[i]
+                intrinsic[i].iter().sum()
             } else if config.observed_work
                 || o.net == 0.0
                 || !o.local
@@ -166,6 +167,13 @@ impl PreparedTrace {
                 o.net
             } else {
                 median.copied().unwrap_or(o.net)
+            };
+            let semaphore_work = if !o.local {
+                [0.0, work, 0.0]
+            } else if config.preserve_work_variation && !config.observed_work {
+                intrinsic[i]
+            } else {
+                o.phase_work(|a, b| (b - a) * work / o.net)
             };
             if o.local && o.net > 0.0 {
                 diagnostics.local_jobs += 1;
@@ -199,14 +207,13 @@ impl PreparedTrace {
                 observed_semaphore: if o.raw.steps.is_empty() || config.semaphore_steps.is_empty() {
                     None
                 } else {
-                    Some(
-                        o.raw
-                            .steps
-                            .iter()
-                            .any(|s| config.semaphore_steps.iter().any(|p| s.name.contains(p))),
-                    )
+                    Some(o.raw.steps.iter().any(|s| {
+                        s.conclusion.as_deref() != Some("skipped")
+                            && config.semaphore_steps.iter().any(|p| s.name.contains(p))
+                    }))
                 },
                 work,
+                semaphore_work,
                 path: 0.0,
                 external_queue: if o.local || o.net == 0.0 {
                     0.0

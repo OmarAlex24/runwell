@@ -31,7 +31,7 @@ fn host_semaphores_have_independent_limits() {
         let active = outcome
             .timings
             .iter()
-            .filter(|t| t.host == Some(host) && t.start == 0.0)
+            .filter(|t| t.host == Some(host) && t.start + t.semaphore_wait == 0.0)
             .count();
         assert_eq!(active, expected);
     }

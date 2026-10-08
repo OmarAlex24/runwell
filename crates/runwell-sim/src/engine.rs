@@ -12,6 +12,13 @@ mod production;
 mod progress;
 
 const EPS: f64 = 1e-7;
+#[derive(Clone, Default)]
+enum Phase {
+    Before,
+    Protected,
+    #[default]
+    Whole,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Event {
     time: f64,
@@ -39,10 +46,13 @@ pub(crate) struct Timing {
     pub end: f64,
     pub failure: bool,
     pub host: Option<usize>,
+    pub semaphore_wait: f64,
+    phase: Phase,
     runner: Option<usize>,
     done: bool,
     cancelled: bool,
     held_at: f64,
+    poll_at: f64,
     slot: bool,
     remaining: f64,
     failure_exposure: f64,
@@ -287,7 +297,7 @@ pub(crate) fn replay_allocation(
             {
                 continue;
             }
-            next = next.min(engine.timings[i].held_at + config.semaphore_timeout_seconds);
+            next = next.min(engine.timings[i].poll_at);
         }
         if !next.is_finite() {
             return Err(Error::Invalid(

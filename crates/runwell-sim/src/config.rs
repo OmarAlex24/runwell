@@ -19,12 +19,16 @@ pub struct Config {
     pub contention_label: Option<String>,
     /// Step-name fragments identifying semaphore waits to subtract from observed work.
     pub semaphore_steps: Vec<String>,
+    /// Step-name fragments whose completion releases the semaphore; missing means job end.
+    pub semaphore_release_steps: Vec<String>,
     /// Baseline semaphore slots per host; absent disables the semaphore.
     pub heavy_slots: Option<usize>,
     /// Optional per-host limits, in host order; the global limit remains the fallback.
     pub heavy_slots_per_host: Vec<usize>,
     /// Baseline semaphore timeout before fail-open.
     pub semaphore_timeout_seconds: f64,
+    /// Retry interval for a polling semaphore; zero means immediate FIFO wakeups.
+    pub semaphore_poll_seconds: f64,
     /// CPU reservation multiplier.
     pub cpu_overcommit: f64,
     /// Memory reservation multiplier.
@@ -93,9 +97,11 @@ impl Default for Config {
             pools: Vec::new(),
             contention_label: None,
             semaphore_steps: Vec::new(),
+            semaphore_release_steps: Vec::new(),
             heavy_slots: None,
             heavy_slots_per_host: Vec::new(),
             semaphore_timeout_seconds: 900.0,
+            semaphore_poll_seconds: 0.0,
             cpu_overcommit: 1.0,
             memory_overcommit: 1.0,
             aging_seconds: 300.0,
@@ -228,6 +234,8 @@ impl Config {
             .any(|f| !f.is_finite() || *f <= 0.0)
             || !self.cancel_grace_seconds.is_finite()
             || self.cancel_grace_seconds < 0.0
+            || !self.semaphore_poll_seconds.is_finite()
+            || self.semaphore_poll_seconds < 0.0
             || self.hosts.is_empty()
             || positive.iter().any(|x| !x.is_finite() || *x <= 0.0)
             || !self.memory_penalty.is_finite()

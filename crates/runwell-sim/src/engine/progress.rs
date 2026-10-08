@@ -8,7 +8,31 @@ impl Engine<'_> {
                 self.running.push(i);
                 continue;
             }
-            self.finish(i, true);
+            match self.timings[i].phase {
+                Phase::Before => {
+                    if let Some(h) = self.timings[i].host {
+                        let r = self.trace.jobs[i].demand.resources();
+                        self.nodes[h].reserved.cpu_slots -= r.cpu_slots;
+                        self.nodes[h].reserved.memory_bytes -= r.memory_bytes;
+                    }
+                    self.timings[i].held_at = self.now;
+                    self.timings[i].poll_at = self.now;
+                    self.held.push(i);
+                }
+                Phase::Protected => {
+                    let t = &mut self.timings[i];
+                    if t.slot {
+                        if let Some(h) = t.host {
+                            self.slots[h] -= 1;
+                        }
+                        t.slot = false;
+                    }
+                    t.phase = Phase::Whole;
+                    t.remaining = self.trace.jobs[i].semaphore_work[2];
+                    self.running.push(i);
+                }
+                Phase::Whole => self.finish(i, true),
+            }
         }
     }
     pub(super) fn finish(&mut self, i: usize, was_running: bool) {

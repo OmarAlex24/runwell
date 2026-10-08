@@ -37,13 +37,31 @@ Baseline pools match a repository, every configured label, and optional exact
 pool wins; an unmatched repository gets six runners. Each additional baseline
 host gets the same pool limits, making that scenario an explicit runner-pool
 replication experiment. Baseline placement uses the first available eligible host.
-The optional semaphore is host-local, holds a runner while waiting, and is acquired
-at job start. `semaphore_steps` specifies step-name fragments whose measured waits
-are subtracted from local work. Fail-open starts work without acquiring a token;
-completion cannot accidentally release someone else's token.
+The optional semaphore is host-local and holds a runner while waiting; the
+waiting job releases its CPU/RAM reservation until protected work starts.
+`semaphore_steps` specifies acquire-step name fragments: recorded waits are
+subtracted from local work, and the gate is reached after pre-acquire work.
+`semaphore_release_steps` specifies release-step fragments. A slot is held until
+the first matching release step completes, or job termination if none exists.
+Using completion conservatively includes the release operation itself; trace
+timestamps cannot identify the exact unlock inside that step. Cleanup after
+release retains the runner and resources but frees the heavy slot. Each phase's
+service work is integrated against the same fitted pressure curve as the whole
+job. The legacy median estimator divides work in observed active-time proportions.
+Without acquire timestamps the gate falls back to job start. Skipped steps are
+not evidence of acquisition. Multiple acquire steps in one job are rejected
+because this model supports one protected section, not nested/repeated locks.
+Fail-open starts protected work without a token, timed from reaching the acquire
+step; neither release nor completion can release someone else's token.
+`semaphore_poll_seconds` defaults to zero (immediate FIFO wakeups). A positive
+interval retries on each waiting job's clock, capped at the timeout deadline;
+later arrivals can acquire before older waiters between polls. This models
+polling without inventing shell overhead or random lock races. Acquisition wins
+over timeout if a slot is free on the final attempt.
 
 With `semaphore_history = true` (default), recorded step presence determines
-whether a historical execution used the gate. Missing step evidence falls back
+whether a historical execution used the gate. An existing step list without an
+executed acquire step disables the gate; an absent step list falls back
 to the configured heavy class. `runner_history` can supply timestamped capacity
 changes (`repo`, zero-based `host`, `at`, `runners`); first observed assignments
 prove availability at that instant, not the activation time. A capacity
