@@ -12,6 +12,7 @@ fn host(class: &str) -> Host {
         class: class.into(),
         cores: 4,
         memory_gib: 16.0,
+        runners: Vec::new(),
     }
 }
 /// Heavy pool from `semaphore_tests::config` plus a `db` pool on two hosts.

@@ -94,18 +94,28 @@ impl Engine<'_> {
                     return 1.0;
                 }
                 let n = &self.nodes[h];
+                let class = self.trace.jobs[i].class;
                 let fit = if self.config.fit_by_class {
-                    &self.trace.classes[self.trace.jobs[i].class].fit
+                    &self.trace.classes[class].fit
                 } else {
                     &self.trace.fit
                 };
-                fit.speed(
+                let speed = fit.speed(
                     f64::from(n.reserved.cpu_slots),
                     f64::from(n.capacity.cpu_slots),
                     n.reserved.memory_bytes as f64 / n.capacity.memory_bytes as f64,
                     self.config.memory_threshold,
                     self.config.memory_penalty,
-                )
+                );
+                match self
+                    .trace
+                    .speed_factors
+                    .get(class)
+                    .and_then(|row| row.get(h))
+                {
+                    Some(factor) => speed / factor,
+                    None => speed,
+                }
             })
             .collect()
     }
@@ -154,7 +164,7 @@ impl Engine<'_> {
 }
 
 // SplitMix64 gives each job a common random draw across all policy comparisons.
-fn uniform(seed: u64, job: u64) -> f64 {
+pub(super) fn uniform(seed: u64, job: u64) -> f64 {
     let mut x = seed.wrapping_add(job.wrapping_mul(0x9e3779b97f4a7c15));
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);

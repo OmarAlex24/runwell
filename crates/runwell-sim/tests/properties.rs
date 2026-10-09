@@ -54,8 +54,8 @@ proptest! {
                 "job_name":format!("job-{i}"),"started_at":ts(i as i64*300),
                 "completed_at":ts(i as i64*300+duration),"conclusion":"success","needs":[]})).unwrap()
         }).collect();
-        let config = Config { hosts:vec![Host {class:"big".into(),cores,memory_gib:31.0},
-            Host {class:"small".into(),cores:cores.max(2)/2,memory_gib:15.0}], ..Config::default() };
+        let config = Config { hosts:vec![Host {class:"big".into(),cores,memory_gib:31.0,runners:vec![]},
+            Host {class:"small".into(),cores:cores.max(2)/2,memory_gib:15.0,runners:vec![]}], ..Config::default() };
         let result = runwell_sim::simulate(&jobs,&config,&[Policy::Fifo,Policy::Shortest,Policy::CriticalPath,Policy::FairShare]).unwrap();
         for i in 0..4 {
             prop_assert!(result.rows[i+4].metrics.p90_minutes <= result.rows[i].metrics.p90_minutes+1e-9);

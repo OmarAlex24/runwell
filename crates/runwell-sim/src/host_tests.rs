@@ -8,11 +8,13 @@ fn host_semaphores_have_independent_limits() {
                 class: "a".into(),
                 cores: 4,
                 memory_gib: 16.0,
+                runners: Vec::new(),
             },
             Host {
                 class: "b".into(),
                 cores: 4,
                 memory_gib: 16.0,
+                runners: Vec::new(),
             },
         ],
         heavy_slots: Some(1),

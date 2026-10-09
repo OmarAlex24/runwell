@@ -2517,6 +2517,7 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "proptest",
+ "regex",
  "runwell-admission",
  "runwell-scheduler",
  "runwell-trace",

@@ -2,6 +2,8 @@
 use crate::Error;
 use runwell_admission::{ReservationAdmission, Resources};
 use serde::{Deserialize, Serialize};
+mod speed;
+pub use speed::{RunnerChoice, SpeedFactor};
 
 /// Replay assumptions and one or more host scenarios.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +86,13 @@ pub struct Config {
     pub availability: Vec<crate::availability::Record>,
     /// Sensitivity only: resource policies additionally require a legacy runner slot.
     pub runwell_runner_availability: bool,
+    /// Equivalent concurrency at or below which samples anchor per-host speed
+    /// factors; defaults to `low_concurrency`.
+    pub factor_low_concurrency: Option<f64>,
+    /// Replay-only per-host speed factor overrides; reports keep the fitted values.
+    pub speed_factors: Vec<SpeedFactor>,
+    /// How runner-limited replay picks among hosts with an idle runner.
+    pub runner_choice: RunnerChoice,
 }
 
 impl Default for Config {
@@ -93,6 +102,7 @@ impl Default for Config {
                 class: "big".into(),
                 cores: 12,
                 memory_gib: 31.0,
+                runners: Vec::new(),
             }],
             default_demand: Demand::default(),
             jobs: Vec::new(),
@@ -130,6 +140,9 @@ impl Default for Config {
             runner_history: Vec::new(),
             availability: Vec::new(),
             runwell_runner_availability: false,
+            factor_low_concurrency: None,
+            speed_factors: Vec::new(),
+            runner_choice: RunnerChoice::First,
         }
     }
 }
@@ -144,6 +157,10 @@ pub struct Host {
     pub cores: u32,
     /// Physical RAM in GiB.
     pub memory_gib: f64,
+    /// Full-match regular expressions for runner names on this host. When any
+    /// host lists patterns, observed jobs are fitted per host by runner name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runners: Vec<String>,
 }
 impl Host {
     /// Physical resources.
@@ -309,6 +326,7 @@ impl Config {
             ));
         }
         self.validate_semaphores()?;
+        self.validate_speed()?;
         for (cores, ram) in self
             .hosts
             .iter()

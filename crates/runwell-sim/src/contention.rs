@@ -132,6 +132,7 @@ pub(crate) struct Occupancy {
     counts: Vec<f64>,
 }
 impl Occupancy {
+    #[cfg(test)]
     pub fn new(intervals: &[(f64, f64)]) -> Self {
         Self::weighted(
             &intervals

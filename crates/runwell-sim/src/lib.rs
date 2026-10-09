@@ -1,10 +1,13 @@
 //! Deterministic discrete-event CI replay using shared scheduler/admission rules.
 #![deny(missing_docs)]
 
+mod attribution;
 pub mod availability;
 pub mod config;
 pub mod contention;
 mod engine;
+mod host_fit;
+pub use host_fit::{HostFactor, HostFit};
 mod intrinsic;
 mod model;
 mod observation;
@@ -180,3 +183,6 @@ mod semaphore_tests;
 
 #[cfg(test)]
 mod pool_tests;
+
+#[cfg(test)]
+mod host_fit_tests;

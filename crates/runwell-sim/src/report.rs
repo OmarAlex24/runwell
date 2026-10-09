@@ -118,6 +118,9 @@ pub struct Report {
     pub contention: ContentionFit,
     /// Per-class slowdown fits and CPU demand proxies.
     pub classes: Vec<crate::ClassModel>,
+    /// Evidence behind per-host speed factors, when runner patterns are configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_fit: Option<crate::HostFit>,
     /// Data quality diagnostics and caveats.
     pub diagnostics: Diagnostics,
     /// All repository/event rows in policy/scenario order.
@@ -167,12 +170,35 @@ impl Report {
                 })
                 .collect();
         }
+        if config.attributes_hosts() {
+            // Runner patterns name private machines; report only how many there are.
+            assumptions["hosts"] = serde_json::json!(
+                config
+                    .hosts
+                    .iter()
+                    .map(|h| serde_json::json!({"class": h.class, "cores": h.cores,
+                        "memory_gib": h.memory_gib, "runner_patterns": h.runners.len()}))
+                    .collect::<Vec<_>>()
+            );
+            assumptions["factor_low_concurrency"] = serde_json::json!(
+                config
+                    .factor_low_concurrency
+                    .unwrap_or(config.low_concurrency)
+            );
+        }
+        if config.runner_choice != crate::config::RunnerChoice::First {
+            assumptions["runner_choice"] = serde_json::json!(config.runner_choice);
+        }
+        if !config.speed_factors.is_empty() {
+            assumptions["speed_factor_overrides"] = serde_json::json!(config.speed_factors.len());
+        }
         Self {
             schema_version: 1,
             seed: config.seed,
             assumptions,
             contention: trace.fit.clone(),
             classes: trace.classes.clone(),
+            host_fit: trace.host_fit.clone(),
             diagnostics: trace.diagnostics.clone(),
             rows: Vec::new(),
             calibration: Vec::new(),

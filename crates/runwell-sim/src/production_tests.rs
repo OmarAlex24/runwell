@@ -16,6 +16,7 @@ fn production_keeps_a_wakeup_consumed_within_event_tolerance() {
             class: "small".into(),
             cores: 2,
             memory_gib: 1.0,
+            runners: Vec::new(),
         }],
         default_demand: Demand {
             cores: 1,

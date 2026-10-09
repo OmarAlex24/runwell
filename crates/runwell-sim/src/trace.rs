@@ -55,6 +55,12 @@ pub struct Diagnostics {
     pub inferred_jobs: usize,
     /// Positive-work jobs without a successful low-concurrency name sample.
     pub unsupported_intrinsic_jobs: usize,
+    /// Positive-work local jobs whose runner matches no host's patterns, or several.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unattributed_jobs: usize,
+    /// Those runner names, listed only when anonymization is off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unattributed_runners: Vec<String>,
     /// Successful first-attempt PR runs used for calibration.
     pub calibration_runs: usize,
     /// Total modeled positive-work local jobs.
@@ -83,6 +89,10 @@ pub struct PreparedTrace {
     pub fit: ContentionFit,
     /// Independently fitted slowdown and inferred CPU demand by job class.
     pub classes: Vec<crate::ClassModel>,
+    /// Replay duration multiple by class and host, after overrides; empty when unused.
+    pub(crate) speed_factors: Vec<Vec<f64>>,
+    /// Evidence behind fitted per-host factors, when runner patterns are configured.
+    pub host_fit: Option<crate::HostFit>,
     /// Input quality and cohort diagnostics.
     pub diagnostics: Diagnostics,
 }
@@ -96,7 +106,9 @@ impl PreparedTrace {
             ..Diagnostics::default()
         };
         let mut observations = crate::observation::read(trace, config, &mut diagnostics)?;
-        let model = crate::model::fit(&mut observations, config);
+        crate::attribution::attribute(&mut observations, config, &mut diagnostics)?;
+        let mut model = crate::model::fit(&mut observations, config);
+        let speed_factors = replay_factors(&mut model, config)?;
         let intrinsic = if config.preserve_work_variation && !config.observed_work {
             crate::intrinsic::estimate(&observations, &model, config)
         } else {
@@ -157,9 +169,7 @@ impl PreparedTrace {
                         && (p.job_names.is_empty() || p.job_names.contains(&o.raw.job_name))
                 })
                 .unwrap_or(default_pool_start + repo);
-            let median = model
-                .medians
-                .get(&(o.raw.repo.clone(), o.raw.job_name.clone()));
+            let median = model.baselines[i].as_ref();
             let work = if config.preserve_work_variation && !config.observed_work {
                 intrinsic[i].iter().sum()
             } else if config.observed_work
@@ -320,9 +330,46 @@ impl PreparedTrace {
             availability,
             fit: model.pooled,
             classes: model.classes,
+            speed_factors,
+            host_fit: model.host_fit,
             diagnostics,
         })
     }
+}
+/// Fitted per-host factors with configured overrides applied, for replay only.
+fn replay_factors(
+    model: &mut crate::model::Model,
+    config: &Config,
+) -> Result<Vec<Vec<f64>>, Error> {
+    if config.speed_factors.is_empty() {
+        return Ok(model.factors.clone());
+    }
+    let mut factors = if model.factors.is_empty() {
+        vec![vec![1.0; config.hosts.len()]; model.class_keys.len()]
+    } else {
+        model.factors.clone()
+    };
+    for o in &config.speed_factors {
+        let mut matched = false;
+        for (c, (repo, job)) in model.class_keys.iter().enumerate() {
+            if *job == o.job && o.repo.as_ref().is_none_or(|r| r == repo) {
+                factors[c][o.host] = o.factor;
+                if let Some(detail) = model.classes[c].host_factors.get_mut(o.host) {
+                    detail.factor = o.factor;
+                }
+                matched = true;
+            }
+        }
+        if !matched {
+            return Err(Error::Invalid(
+                "a speed factor override matches no job class".into(),
+            ));
+        }
+    }
+    Ok(factors)
+}
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 fn alias(index: usize) -> String {
     if index < 26 {

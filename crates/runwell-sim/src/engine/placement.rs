@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::RunnerChoice;
 
 impl Engine<'_> {
     pub(super) fn candidate(&self, i: usize) -> PendingJob {
@@ -63,7 +64,8 @@ impl Engine<'_> {
             if let Some(fairness) = fairness {
                 self.fair_state = fairness;
             }
-            let (i, h) = (p.request_id, p.node_id);
+            let i = p.request_id;
+            let h = self.runner_host(i, p.node_id, &online);
             self.ready.retain(|&j| j != i);
             if let Some(group) = self.trace.jobs[i].matrix_group {
                 self.matrix_active[group] += 1;
@@ -164,5 +166,35 @@ impl Engine<'_> {
         }
         self.running.push(i);
         Ok(())
+    }
+    /// GitHub hands a job to any idle matching runner; with uniform choice the
+    /// host is drawn in proportion to its idle runners, with a per-job seed shared
+    /// across policies. First choice keeps the selector's lowest-index host.
+    fn runner_host(&self, i: usize, chosen: usize, online: &[NodeHeadroom]) -> usize {
+        if !self.policy.runner_limited() || self.config.runner_choice != RunnerChoice::Uniform {
+            return chosen;
+        }
+        let job = &self.trace.jobs[i];
+        let idle: Vec<(usize, usize)> = online
+            .iter()
+            .filter(|n| job.demand.host_class.as_ref().is_none_or(|c| *c == n.class))
+            .map(|n| {
+                (
+                    n.node_id,
+                    n.free_runners.get(job.pool).copied().unwrap_or_default(),
+                )
+            })
+            .filter(|&(_, free)| free > 0)
+            .collect();
+        let total: usize = idle.iter().map(|&(_, free)| free).sum();
+        // A distinct stream from the failure draw, which also keys on the job index.
+        let mut draw = (progress::uniform(!self.config.seed, i as u64) * total as f64) as usize;
+        for (host, free) in idle {
+            if draw < free {
+                return host;
+            }
+            draw -= free;
+        }
+        chosen
     }
 }

@@ -14,6 +14,8 @@ pub(crate) struct Observation<'a> {
     pub semaphore: Option<(f64, f64)>,
     pub concurrency: f64,
     pub local: bool,
+    /// Fitted host; every job is on host 0 unless runner patterns attribute it.
+    pub host: Option<usize>,
     pub demand: Demand,
     pub reuse: Option<usize>,
     pub unstarted: bool,
@@ -157,6 +159,7 @@ pub(crate) fn read<'a>(
             semaphore,
             concurrency: 0.0,
             local,
+            host: Some(0),
             demand: config.demand(&raw.repo, &raw.job_name),
             reuse: None,
             unstarted,

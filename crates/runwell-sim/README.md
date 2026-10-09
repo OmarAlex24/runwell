@@ -276,6 +276,71 @@ OOM or infrastructure failures. The trace cannot identify a separate memory
 failure effect; the speed penalty is a configurable assumption. No retry or
 failure-driven downstream cancellation is simulated.
 
+## Host attribution and speed factors
+
+Hosts can differ in intrinsic speed for a job class, not only in load. Give each
+host `runners` patterns, regular expressions that must match the whole runner
+name. A positive-work local job belongs to the one host whose patterns match its
+runner. A job matching no host, or several, keeps its observed duration, adds no
+load to any host, and is counted in the `unattributed_jobs` diagnostic; with
+`anonymize = false` the unmatched runner names are listed as well. Without
+patterns every local job is on host 0, as in the aggregate model above.
+
+With attribution, each host's concurrency comes from its own jobs and is scaled
+to the first host by `first host cores / host cores`. A duration is modeled as
+`baseline(name) × factor(class, host) × curve(load)`: the factor applies at any
+load and the curve is shared by all hosts. Factors are fitted only from successful
+executions whose equivalent concurrency is at most `factor_low_concurrency`
+(default `low_concurrency`), so a host that is merely busier does not look
+slower. Median polish splits those log durations into a per-name baseline and a
+per-class host effect, which compares matrix names like for like even when they
+ran on the hosts in different proportions. The curve is then fitted to
+`observed / (baseline × factor)` at every load.
+
+Each effect is measured against the host with the most anchor samples for its
+class and shrunk toward no difference with weight `τ² / (τ² + se²)`. Here
+`se² = (π/2) σ² (1/n_host + 1/n_reference)` approximates the variance of a
+difference of medians, `σ` is 1.4826 times the median absolute residual over
+names with more than one sample, and `τ²` is the method-of-moments variance of the
+raw effects across classes, floored at zero. A host with no anchor for a class
+gets no difference. Factors are rescaled so the fastest host for each class is
+1.0, intrinsic work is in that host's seconds, and replay divides a job's speed by
+the factor of the host it runs on. Reports include `host_fit` (threshold, anchor
+samples, `σ`, `τ²`) and, per class, `host_factors` with the raw ratio, samples,
+weight, fitted and applied factor. No factor is taken from a configured prior.
+
+`[[speed_factors]]` (`host`, `job`, optional `repo`, `factor`) replaces a fitted
+factor in replay only, for example to model a configuration change on one host;
+the reported `fitted` value is unchanged. An override matching no job class is an
+error. Measure the change and refit before treating such a scenario as evidence.
+
+Baseline placement takes the first available eligible host. A dispatcher that
+hands each job to whichever idle runner polls first is closer to
+`runner_choice = "uniform"`: a runner-limited job then goes to a host drawn in
+proportion to its idle runners in the job's pool, with a seeded per-job draw that
+baseline and `runwell-equivalent` share. Resource policies are unaffected.
+
+```toml
+runner_choice = "uniform"
+
+[[hosts]]
+class = "large"
+cores = 12
+memory_gib = 32
+runners = ["app-[0-9]+"]
+
+[[hosts]]
+class = "small"
+cores = 8
+memory_gib = 16
+runners = ["app-small-[0-9]+"]
+
+[[speed_factors]]
+host = 0
+job = "integration-db"
+factor = 1.0
+```
+
 ## Metrics and calibration
 
 End-to-end latency is run creation to the last simulated job completion. Quantiles
@@ -320,7 +385,9 @@ does not include thousands of independent allocation-search replays.
 
 Synthetic unit tests cover the contention fit, event ties, dependency closure,
 semaphores, host pins, external-host isolation, input artifacts, and deterministic
-failures. Proptest checks reservation bounds, aging and eventual selection, and
+failures. Host tests cover runner attribution with unmatched and ambiguous names,
+a busy host that a naive median ratio calls slow, factor shrinkage, overrides,
+uniform runner choice, and several semaphore pools on per-host slot histories. Proptest checks reservation bounds, aging and eventual selection, and
 p90 monotonicity when adding a host to independent homogeneous-resource bursts
 under every runwell priority. General heterogeneous DAG scheduling can have
 resource/list-scheduling anomalies; the extra-host property is intentionally not

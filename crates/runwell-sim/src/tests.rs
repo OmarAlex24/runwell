@@ -26,6 +26,7 @@ fn config(cores: u32) -> Config {
             class: "big".into(),
             cores,
             memory_gib: 32.0,
+            runners: Vec::new(),
         }],
         pools: vec![Pool {
             repo: "example/app".into(),
@@ -214,6 +215,7 @@ fn priorities_and_class_pinning_use_shared_scheduler() {
         class: "small".into(),
         cores: 2,
         memory_gib: 8.0,
+        runners: Vec::new(),
     });
     c.default_demand.host_class = Some("big".into());
     let p = PreparedTrace::new(&trace, &c).unwrap();
