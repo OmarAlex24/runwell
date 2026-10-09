@@ -178,8 +178,17 @@ impl Occupancy {
             self.areas[i - 1] + (t - self.times[i - 1]) * self.counts[i - 1]
         }
     }
+    #[cfg(test)]
     pub fn peak(&self) -> f64 {
-        self.counts.iter().copied().fold(0.0, f64::max)
+        self.peak_between(f64::NEG_INFINITY, f64::INFINITY)
+    }
+    /// Highest count at any instant of `[a, b]`.
+    pub fn peak_between(&self, a: f64, b: f64) -> f64 {
+        let first = self.times.partition_point(|x| *x <= a).saturating_sub(1);
+        let last = self.times.partition_point(|x| *x <= b);
+        self.counts
+            .get(first..last)
+            .map_or(0.0, |c| c.iter().copied().fold(0.0, f64::max))
     }
     pub fn mean(&self, a: f64, b: f64) -> f64 {
         if b <= a {

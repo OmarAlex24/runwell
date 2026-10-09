@@ -3,6 +3,7 @@ use crate::Error;
 use runwell_admission::{ReservationAdmission, Resources};
 use serde::{Deserialize, Serialize};
 mod speed;
+mod window;
 pub use speed::{RunnerChoice, SpeedFactor};
 
 /// Replay assumptions and one or more host scenarios.
@@ -93,6 +94,17 @@ pub struct Config {
     pub speed_factors: Vec<SpeedFactor>,
     /// How runner-limited replay picks among hosts with an idle runner.
     pub runner_choice: RunnerChoice,
+    /// Only jobs starting in `[fit_since, fit_until)` fit curves, factors, failure
+    /// rates and CPU reservations. Every job still loads its host and is replayed.
+    pub fit_since: Option<jiff::Timestamp>,
+    /// End of the fit window, exclusive.
+    pub fit_until: Option<jiff::Timestamp>,
+    /// Only runs created in `[report_since, report_until)` form reported cohorts.
+    pub report_since: Option<jiff::Timestamp>,
+    /// End of the report window, exclusive.
+    pub report_until: Option<jiff::Timestamp>,
+    /// Host-count scenario whose baseline is compared with the observed cohorts.
+    pub calibration_hosts: usize,
 }
 
 impl Default for Config {
@@ -143,6 +155,11 @@ impl Default for Config {
             factor_low_concurrency: None,
             speed_factors: Vec::new(),
             runner_choice: RunnerChoice::First,
+            fit_since: None,
+            fit_until: None,
+            report_since: None,
+            report_until: None,
+            calibration_hosts: 1,
         }
     }
 }
@@ -327,6 +344,7 @@ impl Config {
         }
         self.validate_semaphores()?;
         self.validate_speed()?;
+        self.validate_windows()?;
         for (cores, ram) in self
             .hosts
             .iter()

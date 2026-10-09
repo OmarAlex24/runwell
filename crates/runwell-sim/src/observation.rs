@@ -16,6 +16,8 @@ pub(crate) struct Observation<'a> {
     pub local: bool,
     /// Fitted host; every job is on host 0 unless runner patterns attribute it.
     pub host: Option<usize>,
+    /// Whether the job starts inside the fit window.
+    pub fit: bool,
     pub demand: Demand,
     pub reuse: Option<usize>,
     pub unstarted: bool,
@@ -160,6 +162,7 @@ pub(crate) fn read<'a>(
             concurrency: 0.0,
             local,
             host: Some(0),
+            fit: config.in_fit_window(raw.started_at),
             demand: config.demand(&raw.repo, &raw.job_name),
             reuse: None,
             unstarted,

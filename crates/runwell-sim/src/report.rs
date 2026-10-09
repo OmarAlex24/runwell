@@ -87,7 +87,7 @@ impl From<Metrics> for ObservedMetrics {
     }
 }
 
-/// Baseline, one-host comparison against the matching observed cohort.
+/// Baseline comparison against the matching observed cohort, at `calibration_hosts`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Calibration {
     /// Repository alias or name.
@@ -125,7 +125,7 @@ pub struct Report {
     pub diagnostics: Diagnostics,
     /// All repository/event rows in policy/scenario order.
     pub rows: Vec<Row>,
-    /// One-host baseline calibration, if baseline was requested.
+    /// Baseline calibration at `calibration_hosts`, if baseline was requested.
     pub calibration: Vec<Calibration>,
     /// Exact equivalence against baseline with its semaphore disabled.
     pub equivalence: Vec<crate::experiments::Equivalence>,
@@ -192,6 +192,19 @@ impl Report {
         if !config.speed_factors.is_empty() {
             assumptions["speed_factor_overrides"] = serde_json::json!(config.speed_factors.len());
         }
+        for (key, at) in [
+            ("fit_since", config.fit_since),
+            ("fit_until", config.fit_until),
+            ("report_since", config.report_since),
+            ("report_until", config.report_until),
+        ] {
+            if let Some(at) = at {
+                assumptions[key] = serde_json::json!(at);
+            }
+        }
+        if config.calibration_hosts != 1 {
+            assumptions["calibration_hosts"] = serde_json::json!(config.calibration_hosts);
+        }
         Self {
             schema_version: 1,
             seed: config.seed,
@@ -257,7 +270,7 @@ impl Report {
             }
             let mut metrics = Metrics::new(&values, queue);
             metrics.cancelled_runs = runs.iter().filter(|&&r| outcome.cancelled_runs[r]).count();
-            if hosts == 1 && policy == Policy::Baseline {
+            if hosts == trace.config.calibration_hosts && policy == Policy::Baseline {
                 let observed_queue = runs.iter().map(|&r| trace.runs[r].observed_queue).sum();
                 let actual = Metrics::new(&observed, observed_queue);
                 let p50_error = relative_error(metrics.p50_minutes, actual.p50_minutes);

@@ -6,7 +6,21 @@ impl Report {
         let mut out = String::from(
             "Times are minutes. Queue is critical-path waiting share; failure counts are all-cause-derived proxies.\n\n",
         );
-        out.push_str("Calibration against observed matching cohorts (one host, baseline):\n\n| Repo | Event | Observed p50 | Observed p90 | Observed queue | p50 error | p90 error | Queue error pp | Calibrated |\n|---|---|---:|---:|---:|---:|---:|---:|---|\n");
+        let hosts = self
+            .assumptions
+            .get("calibration_hosts")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(1);
+        let scope = if hosts == 1 {
+            "one host".to_owned()
+        } else {
+            format!("{hosts} hosts")
+        };
+        let _ = write!(
+            out,
+            "Calibration against observed matching cohorts ({scope}, baseline):\n\n"
+        );
+        out.push_str("| Repo | Event | Observed p50 | Observed p90 | Observed queue | p50 error | p90 error | Queue error pp | Calibrated |\n|---|---|---:|---:|---:|---:|---:|---:|---|\n");
         for c in &self.calibration {
             let _ = writeln!(
                 out,

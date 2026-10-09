@@ -352,8 +352,8 @@ replay window, including idle time and background runs. They are fleet metrics,
 so their values repeat across repository/event rows. Failure counts in each row
 cover its reported cohort; JSON also includes whole-replay failures and fail-opens.
 
-The one-host baseline compares p50, p90 and observed critical-path queue share
-with matching observed cohorts. It prints signed latency errors, queue-share
+The one-host baseline (or `calibration_hosts`, below) compares p50, p90 and
+observed critical-path queue share with matching observed cohorts. It prints signed latency errors, queue-share
 error in percentage points, and an explicit 10% latency pass/miss. Observed
 successes cancelled in replay are counted separately and excluded from completed
 latency quantiles. Any such censoring fails calibration, even if both quantiles
@@ -363,6 +363,19 @@ exploratory until calibration passes. Missing workflow edges, runner availabilit
 dispatch rules, cancellation behavior, resource measurements and per-job
 contention sensitivity can prevent a defensible match. If an external baseline
 uses a different date range or cohort, compare that separately as well.
+
+For holdout validation on one trace, `fit_since` / `fit_until` restrict every
+fitted quantity to jobs starting in that half-open window: speed factors, curves,
+low-load medians, failure rates, the CPU reservation proxy (whose peak is taken
+while window jobs ran) and the work-weighted cores per job. Every job still loads
+its host, and held-out jobs are replayed with work recovered from their own
+observed durations through the frozen model. A holdout therefore tests the
+curve, the factors and the scheduling model on unseen executions; it does not
+predict durations from nothing. `report_since` / `report_until` restrict reported
+cohorts to runs created in that window; earlier runs still replay as load. Set
+`calibration_hosts` to compare the baseline at that host count instead of one,
+for example when `runner_history` describes the hosts that actually ran. Reports
+list each configured window and a non-default calibration host count.
 
 ## Persistent-runner allocation search
 
@@ -387,7 +400,8 @@ Synthetic unit tests cover the contention fit, event ties, dependency closure,
 semaphores, host pins, external-host isolation, input artifacts, and deterministic
 failures. Host tests cover runner attribution with unmatched and ambiguous names,
 a busy host that a naive median ratio calls slow, factor shrinkage, overrides,
-uniform runner choice, and several semaphore pools on per-host slot histories. Proptest checks reservation bounds, aging and eventual selection, and
+uniform runner choice, several semaphore pools on per-host slot histories, and
+fit and report windows that keep held-out jobs out of every fitted quantity. Proptest checks reservation bounds, aging and eventual selection, and
 p90 monotonicity when adding a host to independent homogeneous-resource bursts
 under every runwell priority. General heterogeneous DAG scheduling can have
 resource/list-scheduling anomalies; the extra-host property is intentionally not

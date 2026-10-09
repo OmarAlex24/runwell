@@ -147,10 +147,14 @@ impl PreparedTrace {
                     observed: 0.0,
                     observed_queue: 0.0,
                     cancel_at: None,
-                    report: (config.report_workflows.is_empty()
-                        || config.report_workflows.iter().any(|w| {
-                            w.repo == o.raw.repo && Some(&*w.name) == o.raw.workflow.as_deref()
-                        }))
+                    report: o
+                        .raw
+                        .run_created_at
+                        .is_some_and(|t| config.in_report_window(t))
+                        && (config.report_workflows.is_empty()
+                            || config.report_workflows.iter().any(|w| {
+                                w.repo == o.raw.repo && Some(&*w.name) == o.raw.workflow.as_deref()
+                            }))
                         && (!config.successful_first_attempt
                             || (latest_attempt.get(&(&o.raw.repo, o.raw.run_id)) == Some(&1)
                                 && o.raw.run_conclusion.as_deref() == Some("success"))),

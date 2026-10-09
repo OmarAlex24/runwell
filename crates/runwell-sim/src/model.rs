@@ -144,7 +144,11 @@ pub(crate) fn fit(observations: &mut [Observation<'_>], config: &Config) -> Mode
         })
     };
     let fitted = |o: &Observation<'_>| {
-        o.local && o.net > 0.0 && o.host.is_some() && o.raw.conclusion.as_deref() == Some("success")
+        o.local
+            && o.net > 0.0
+            && o.fit
+            && o.host.is_some()
+            && o.raw.conclusion.as_deref() == Some("success")
     };
     let mut class_samples = vec![Vec::new(); class_index.len()];
     let mut all = Vec::new();
@@ -160,10 +164,17 @@ pub(crate) fn fit(observations: &mut [Observation<'_>], config: &Config) -> Mode
             all.push(sample);
         }
     }
+    // Peak load while any fit-window job ran; held-out load does not size reservations.
+    let (since, until) = observations
+        .iter()
+        .filter(|o| o.local && o.net > 0.0 && o.fit)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), o| {
+            (a.min(o.start), b.max(o.end))
+        });
     let peak = occupancy
         .iter()
         .zip(&scale)
-        .map(|(o, s)| o.peak() * s)
+        .map(|(o, s)| o.peak_between(since, until) * s)
         .fold(0.0, f64::max);
     let anchor = reference / peak.max(1.0);
     let mut classes: Vec<_> = class_samples
@@ -193,12 +204,12 @@ pub(crate) fn fit(observations: &mut [Observation<'_>], config: &Config) -> Mode
     }
     let work = observations
         .iter()
-        .filter(|o| o.local)
+        .filter(|o| o.local && o.fit)
         .map(|o| o.net)
         .sum::<f64>();
     let mean_cores = observations
         .iter()
-        .filter(|o| o.local)
+        .filter(|o| o.local && o.fit)
         .map(|o| o.net * f64::from(o.demand.cores))
         .sum::<f64>()
         / work.max(1.0);
@@ -243,6 +254,7 @@ pub(crate) fn fit(observations: &mut [Observation<'_>], config: &Config) -> Mode
     for (o, &id) in observations.iter().zip(&class_ids) {
         if o.local
             && o.net > 0.0
+            && o.fit
             && o.host.is_some()
             && o.demand.heavy
             && matches!(o.raw.conclusion.as_deref(), Some("success" | "failure"))
@@ -279,6 +291,7 @@ fn legacy_medians(observations: &[Observation<'_>], config: &Config) -> Vec<Opti
     for o in observations.iter().filter(|o| {
         o.local
             && o.net > 0.0
+            && o.fit
             && o.concurrency <= config.low_concurrency
             && o.raw.conclusion.as_deref() == Some("success")
     }) {

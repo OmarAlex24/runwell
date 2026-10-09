@@ -78,6 +78,7 @@ pub(crate) fn fit(
         .filter(|(_, o)| {
             o.local
                 && o.net > 0.0
+                && o.fit
                 && o.concurrency <= anchor
                 && o.raw.conclusion.as_deref() == Some("success")
         })

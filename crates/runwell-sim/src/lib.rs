@@ -186,3 +186,5 @@ mod pool_tests;
 
 #[cfg(test)]
 mod host_fit_tests;
+#[cfg(test)]
+mod window_tests;
