@@ -2383,7 +2383,7 @@ dependencies = [
 name = "runwell-node"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "jiff",
  "jsonwebtoken",
@@ -2412,7 +2412,7 @@ dependencies = [
 name = "runwell-report"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "fastrand",
  "httpdate",
@@ -2468,7 +2468,7 @@ dependencies = [
 name = "runwell-scaleset"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-core",
  "futures-util",
  "httpdate",
