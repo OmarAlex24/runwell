@@ -131,10 +131,7 @@ pub struct Report {
 }
 impl Report {
     pub(crate) fn new(trace: &PreparedTrace, config: &Config) -> Self {
-        Self {
-            schema_version: 1,
-            seed: config.seed,
-            assumptions: serde_json::json!({"hosts": config.hosts, "cpu_overcommit": config.cpu_overcommit,
+        let mut assumptions = serde_json::json!({"hosts": config.hosts, "cpu_overcommit": config.cpu_overcommit,
                 "memory_overcommit": config.memory_overcommit, "heavy_slots": config.heavy_slots,
                 "heavy_slots_per_host": config.heavy_slots_per_host,
                 "semaphore_timeout_seconds": config.semaphore_timeout_seconds, "aging_seconds": config.aging_seconds,
@@ -154,7 +151,26 @@ impl Report {
                 "overcommit_sweep": config.overcommit_sweep, "runner_history_changes": config.runner_history.len(),
                 "availability_records": config.availability.len(), "runwell_runner_availability": config.runwell_runner_availability,
                 "host_outage_semantics": "pause work and dispatch; retain reservations",
-                "classic_availability": "cycle observed runner patterns on recorded hosts; chosen counts replace capacity history"}),
+                "classic_availability": "cycle observed runner patterns on recorded hosts; chosen counts replace capacity history"});
+        if !config.semaphores.is_empty() {
+            // Pool names and limits only; step names can identify private workflows.
+            assumptions["semaphore_pools"] = config
+                .semaphores
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    let gate = config.gate(i + 1);
+                    serde_json::json!({"name": s.name, "slots": s.slots,
+                        "slots_per_host": s.slots_per_host, "slot_changes": s.slot_history.len(),
+                        "timeout_seconds": gate.timeout, "poll_seconds": gate.poll,
+                        "release_steps_configured": !s.release_steps.is_empty()})
+                })
+                .collect();
+        }
+        Self {
+            schema_version: 1,
+            seed: config.seed,
+            assumptions,
             contention: trace.fit.clone(),
             classes: trace.classes.clone(),
             diagnostics: trace.diagnostics.clone(),

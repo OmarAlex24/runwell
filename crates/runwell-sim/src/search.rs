@@ -158,10 +158,11 @@ pub fn search_allocations(
                         .collect();
                     for (mode, slots) in [None, Some(options.heavy_slots)].into_iter().enumerate() {
                         let mut config = trace.config.clone();
-                        config.heavy_slots = slots;
                         if slots.is_none() {
-                            config.heavy_slots_per_host.clear();
+                            // The disabled mode removes every pool, not only heavy.
+                            config.disable_gates();
                         }
+                        config.heavy_slots = slots;
                         config.semaphore_history = false;
                         let Ok(outcome) = engine::replay_allocation(
                             trace,

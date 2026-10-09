@@ -21,8 +21,7 @@ pub fn verify_equivalent(trace: &PreparedTrace, hosts: usize) -> Result<Equivale
         return Err(Error::Invalid("invalid host count".into()));
     }
     let mut reference = trace.config.clone();
-    reference.heavy_slots = None;
-    reference.heavy_slots_per_host.clear();
+    reference.disable_gates();
     let baseline = engine::replay(trace, &reference, Policy::Baseline, hosts)?;
     let equivalent = engine::replay(trace, &trace.config, Policy::Equivalent, hosts)?;
     let mut error = 0.0_f64;

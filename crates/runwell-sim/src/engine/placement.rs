@@ -80,12 +80,13 @@ impl Engine<'_> {
                 self.refresh_pool(h, pool);
             }
             if self.policy == Policy::Baseline
+                && let Some(gate) = self.trace.jobs[i].gate
                 && runwell_scheduler::requires_heavy_slot(
-                    self.trace.jobs[i].demand.heavy,
+                    true,
                     self.trace.jobs[i].observed_semaphore,
                     self.config.semaphore_history,
                 )
-                && self.config.heavy_slots_on(h).is_some()
+                && self.gate_limit(gate, h).is_some()
             {
                 self.timings[i].phase = Phase::Before;
                 self.timings[i].remaining = self.trace.jobs[i].semaphore_work[0];
@@ -99,30 +100,32 @@ impl Engine<'_> {
     pub(super) fn start_held(&mut self) -> Result<(), Error> {
         let held = std::mem::take(&mut self.held);
         for i in held {
-            let Some(h) = self.timings[i].host else {
+            let (Some(h), Some(gate)) = (self.timings[i].host, self.trace.jobs[i].gate) else {
                 continue;
             };
-            let Some(limit) = self.config.heavy_slots_on(h) else {
+            let Some(limit) = self.gate_limit(gate, h) else {
                 self.start(i)?;
                 continue;
             };
-            if self.host_offline[h] > 0
-                || (self.config.semaphore_poll_seconds > 0.0
-                    && self.now + EPS < self.timings[i].poll_at)
+            let (timeout, poll) = {
+                let g = self.config.gate(gate);
+                (g.timeout, g.poll)
+            };
+            if self.host_offline[h] > 0 || (poll > 0.0 && self.now + EPS < self.timings[i].poll_at)
             {
                 self.held.push(i);
                 continue;
             }
             match heavy_slot(
-                self.slots[h],
+                self.slots[gate][h],
                 limit,
                 self.now - self.timings[i].held_at + EPS,
-                self.config.semaphore_timeout_seconds,
+                timeout,
             ) {
                 SemaphoreDecision::Wait => {
-                    let deadline = self.timings[i].held_at + self.config.semaphore_timeout_seconds;
-                    self.timings[i].poll_at = if self.config.semaphore_poll_seconds > 0.0 {
-                        (self.now + self.config.semaphore_poll_seconds).min(deadline)
+                    let deadline = self.timings[i].held_at + timeout;
+                    self.timings[i].poll_at = if poll > 0.0 {
+                        (self.now + poll).min(deadline)
                     } else {
                         deadline
                     };
@@ -130,7 +133,7 @@ impl Engine<'_> {
                 }
                 decision => {
                     if decision == SemaphoreDecision::Acquire {
-                        self.slots[h] += 1;
+                        self.slots[gate][h] += 1;
                         self.timings[i].slot = true;
                     } else {
                         self.fail_opens += 1;

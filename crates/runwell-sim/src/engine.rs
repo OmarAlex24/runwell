@@ -90,7 +90,10 @@ struct Engine<'a> {
     ready: Vec<usize>,
     held: Vec<usize>,
     running: Vec<usize>,
-    slots: Vec<usize>,
+    /// Acquired tokens per semaphore pool and host.
+    slots: Vec<Vec<usize>>,
+    /// Slot changes `(time, pool, host, slots)` in time order.
+    slot_changes: Vec<(f64, usize, usize, usize)>,
     service: Vec<f64>,
     matrix_active: Vec<usize>,
     timings: Vec<Timing>,
@@ -98,6 +101,39 @@ struct Engine<'a> {
     cpu_area: f64,
     memory_area: f64,
     fail_opens: usize,
+}
+
+/// Slot history of every enabled named pool, relative to the trace origin.
+fn slot_changes(trace: &PreparedTrace, config: &Config) -> Vec<(f64, usize, usize, usize)> {
+    let mut changes: Vec<_> = config
+        .semaphores
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| {
+            s.slot_history.iter().map(move |c| {
+                (
+                    c.at.as_millisecond() as f64 / 1000.0 - trace.origin,
+                    i + 1,
+                    c.host,
+                    c.slots,
+                )
+            })
+        })
+        .collect();
+    changes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    changes
+}
+
+impl Engine<'_> {
+    /// Slots of a pool on a host at the current time; `None` means ungated.
+    fn gate_limit(&self, gate: usize, host: usize) -> Option<usize> {
+        self.slot_changes
+            .iter()
+            .rev()
+            .find(|c| c.0 <= self.now + EPS && c.1 == gate && c.2 == host)
+            .map(|c| c.3)
+            .or_else(|| self.config.gate_slots(gate, host))
+    }
 }
 
 pub(crate) fn replay(
@@ -208,7 +244,8 @@ pub(crate) fn replay_allocation(
         ready: Vec::new(),
         held: Vec::new(),
         running: Vec::new(),
-        slots: vec![0; hosts],
+        slots: vec![vec![0; hosts]; config.gate_count()],
+        slot_changes: slot_changes(trace, config),
         service: vec![0.0; trace.repos.len()],
         matrix_active: vec![0; trace.jobs.len()],
         timings: vec![Timing::default(); trace.jobs.len()],
@@ -298,6 +335,11 @@ pub(crate) fn replay_allocation(
                 continue;
             }
             next = next.min(engine.timings[i].poll_at);
+        }
+        if !engine.held.is_empty()
+            && let Some(&(at, ..)) = engine.slot_changes.iter().find(|c| c.0 > engine.now + EPS)
+        {
+            next = next.min(at);
         }
         if !next.is_finite() {
             return Err(Error::Invalid(

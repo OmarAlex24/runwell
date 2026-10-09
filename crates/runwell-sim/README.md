@@ -68,6 +68,36 @@ prove availability at that instant, not the activation time. A capacity
 reduction drains occupied slots; an increase immediately wakes queued jobs.
 Classic counterfactuals ignore history and apply their chosen gate throughout.
 
+The keys above configure the `heavy` pool. Further named pools use
+`[[semaphores]]` tables with `name`, `acquire_steps`, `release_steps`, `slots`,
+`slots_per_host`, and optional `timeout_seconds` / `poll_seconds` (defaulting to
+the global values). A job joins a named pool through `semaphore = "db"` in its
+demand override; `heavy = true` still selects the heavy pool, and a job uses at
+most one pool. Every pool has the same acquire, wait, poll, fail-open and release
+rules, its own tokens on each host, and its own step-presence history. A step
+matching two pools' fragments is an error. `[[semaphores.slot_history]]` entries
+(`host`, `at`, `slots`) change one host's limit from a timestamp on: a reduction
+drains held tokens, and waiting jobs see an increase at their next poll (or at
+once without polling). Classic search's disabled mode and the equivalence check
+turn every pool off. Reports list pool names and limits, never step names.
+
+```toml
+[[semaphores]]
+name = "db"
+acquire_steps = ["Wait for a database slot"]
+release_steps = ["Release the database slot"]
+slots_per_host = [2, 4]
+[[semaphores.slot_history]]
+host = 1
+at = "2026-01-02T00:00:00Z"
+slots = 1
+
+[[jobs]]
+name = "integration-db"
+[jobs.demand]
+semaphore = "db"
+```
+
 ## Availability input
 
 `--availability /tmp/availability.jsonl` accepts timestamped capacity changes and

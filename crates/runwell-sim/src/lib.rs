@@ -177,3 +177,6 @@ mod host_tests;
 
 #[cfg(test)]
 mod semaphore_tests;
+
+#[cfg(test)]
+mod pool_tests;

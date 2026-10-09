@@ -28,6 +28,7 @@ pub(crate) fn read<'a>(
     diagnostics: &mut Diagnostics,
 ) -> Result<Vec<Observation<'a>>, Error> {
     let mut observations = Vec::new();
+    let gates: Vec<_> = (0..config.gate_count()).map(|g| config.gate(g)).collect();
     let mut first_attempts = BTreeMap::new();
     for raw in trace {
         first_attempts
@@ -80,11 +81,29 @@ pub(crate) fn read<'a>(
             .unwrap_or(arrival)
             .max(arrival)
             .min(start.max(arrival));
-        let waits: Vec<_> = raw
+        let acquires: Vec<_> = raw
             .steps
             .iter()
             .filter(|s| s.conclusion.as_deref() != Some("skipped"))
-            .filter(|s| config.semaphore_steps.iter().any(|p| s.name.contains(p)))
+            .filter_map(|s| {
+                let mut pools = gates
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| g.acquire.iter().any(|p| s.name.contains(p)))
+                    .map(|(i, _)| i);
+                let pool = pools.next()?;
+                Some(if pools.next().is_some() {
+                    Err(Error::Invalid(
+                        "a step matches more than one semaphore pool".into(),
+                    ))
+                } else {
+                    Ok((s, pool))
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        let waits: Vec<_> = acquires
+            .iter()
+            .map(|(s, _)| s)
             .filter_map(|s| {
                 Some((
                     seconds(s.started_at?).max(start),
@@ -94,36 +113,25 @@ pub(crate) fn read<'a>(
             .filter(|(a, b)| b > a)
             .collect();
         let active = active_intervals(start, end, &waits);
-        let acquires: Vec<_> = raw
-            .steps
-            .iter()
-            .filter(|s| {
-                s.conclusion.as_deref() != Some("skipped")
-                    && config.semaphore_steps.iter().any(|p| s.name.contains(p))
-            })
-            .collect();
         if acquires.len() > 1 {
             return Err(Error::Invalid(
                 "multiple semaphore acquisitions per job are unsupported".into(),
             ));
         }
-        let semaphore = acquires.first().and_then(|s| s.started_at).map(|at| {
-            let acquire = seconds(at).clamp(start, end.max(start));
+        let semaphore = acquires.first().and_then(|&(s, pool)| {
+            let acquire = seconds(s.started_at?).clamp(start, end.max(start));
             let release = raw
                 .steps
                 .iter()
                 .filter(|s| {
                     s.conclusion.as_deref() != Some("skipped")
-                        && config
-                            .semaphore_release_steps
-                            .iter()
-                            .any(|p| s.name.contains(p))
+                        && gates[pool].release.iter().any(|p| s.name.contains(p))
                 })
                 .filter_map(|s| s.completed_at.map(seconds))
                 .filter(|&at| at >= acquire)
                 .min_by(f64::total_cmp)
                 .unwrap_or(end);
-            (acquire, release.clamp(acquire, end.max(acquire)))
+            Some((acquire, release.clamp(acquire, end.max(acquire))))
         });
         let net = active.iter().map(|(a, b)| b - a).sum::<f64>();
         let waits = (end - start - net).max(0.0);

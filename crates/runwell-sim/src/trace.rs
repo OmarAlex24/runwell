@@ -23,6 +23,8 @@ pub(crate) struct Job {
     pub max_parallel: Option<usize>,
     pub observed_queue: f64,
     pub class: usize,
+    /// Semaphore pool gating this job in baseline replay.
+    pub gate: Option<usize>,
     pub observed_semaphore: Option<bool>,
 }
 #[derive(Debug, Clone)]
@@ -75,6 +77,8 @@ pub struct PreparedTrace {
     pub(crate) pool_repos: Vec<usize>,
     pub(crate) availability: Vec<crate::availability::Change>,
     pub(crate) runner_history: Vec<(f64, usize, usize, usize)>,
+    /// Earliest run creation, in epoch seconds; replay times are relative to it.
+    pub(crate) origin: f64,
     /// Fitted contention and heavy failure proxies.
     pub fit: ContentionFit,
     /// Independently fitted slowdown and inferred CPU demand by job class.
@@ -175,6 +179,10 @@ impl PreparedTrace {
             } else {
                 o.phase_work(|a, b| (b - a) * work / o.net)
             };
+            let gate = config.gate_of(&o.demand);
+            let acquire = config
+                .gate(gate.unwrap_or(crate::config::HEAVY_GATE))
+                .acquire;
             if o.local && o.net > 0.0 {
                 diagnostics.local_jobs += 1;
                 diagnostics.unsupported_intrinsic_jobs += usize::from(median.is_none());
@@ -204,12 +212,13 @@ impl PreparedTrace {
                 max_parallel: o.raw.max_parallel,
                 observed_queue: 0.0,
                 class: model.class_ids[i],
-                observed_semaphore: if o.raw.steps.is_empty() || config.semaphore_steps.is_empty() {
+                gate,
+                observed_semaphore: if o.raw.steps.is_empty() || acquire.is_empty() {
                     None
                 } else {
                     Some(o.raw.steps.iter().any(|s| {
                         s.conclusion.as_deref() != Some("skipped")
-                            && config.semaphore_steps.iter().any(|p| s.name.contains(p))
+                            && acquire.iter().any(|p| s.name.contains(p))
                     }))
                 },
                 work,
@@ -307,6 +316,7 @@ impl PreparedTrace {
             pool_limits,
             pool_repos,
             runner_history,
+            origin,
             availability,
             fit: model.pooled,
             classes: model.classes,

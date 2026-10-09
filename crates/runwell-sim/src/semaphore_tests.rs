@@ -1,7 +1,7 @@
 use crate::{Config, Policy, PreparedTrace, engine, tests::job};
 use runwell_trace::{TraceJob, TraceStep};
 
-fn step(name: &str, start: i64, end: i64) -> TraceStep {
+pub(crate) fn step(name: &str, start: i64, end: i64) -> TraceStep {
     TraceStep {
         name: name.into(),
         started_at: Some(jiff::Timestamp::from_second(start).unwrap()),
@@ -9,7 +9,7 @@ fn step(name: &str, start: i64, end: i64) -> TraceStep {
         conclusion: Some("success".into()),
     }
 }
-fn config() -> Config {
+pub(crate) fn config() -> Config {
     let mut c = Config {
         observed_work: true,
         heavy_slots: Some(1),

@@ -29,6 +29,8 @@ pub struct Config {
     pub semaphore_timeout_seconds: f64,
     /// Retry interval for a polling semaphore; zero means immediate FIFO wakeups.
     pub semaphore_poll_seconds: f64,
+    /// Further named semaphore pools. The legacy keys above remain the `heavy` pool.
+    pub semaphores: Vec<Semaphore>,
     /// CPU reservation multiplier.
     pub cpu_overcommit: f64,
     /// Memory reservation multiplier.
@@ -102,6 +104,7 @@ impl Default for Config {
             heavy_slots_per_host: Vec::new(),
             semaphore_timeout_seconds: 900.0,
             semaphore_poll_seconds: 0.0,
+            semaphores: Vec::new(),
             cpu_overcommit: 1.0,
             memory_overcommit: 1.0,
             aging_seconds: 300.0,
@@ -164,6 +167,9 @@ pub struct Demand {
     pub heavy: bool,
     /// Restrict placement to this host class, when set.
     pub host_class: Option<String>,
+    /// Named semaphore pool gating this job; `heavy` already selects the heavy pool.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semaphore: Option<String>,
 }
 impl Default for Demand {
     fn default() -> Self {
@@ -172,8 +178,60 @@ impl Default for Demand {
             memory_gib: 1.0,
             heavy: false,
             host_class: None,
+            semaphore: None,
         }
     }
+}
+
+/// Additional host-local semaphore with the heavy pool's wait, poll and fail-open rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Semaphore {
+    /// Pool name referenced by `Demand::semaphore`; `heavy` is reserved.
+    pub name: String,
+    /// Step-name fragments of the recorded acquire (wait) step.
+    pub acquire_steps: Vec<String>,
+    /// Step-name fragments whose completion releases a slot; missing means job end.
+    #[serde(default)]
+    pub release_steps: Vec<String>,
+    /// Slots on hosts without a per-host entry; absent leaves those hosts ungated.
+    #[serde(default)]
+    pub slots: Option<usize>,
+    /// Per-host slots in host order.
+    #[serde(default)]
+    pub slots_per_host: Vec<usize>,
+    /// Timestamped per-host slot changes for baseline replay.
+    #[serde(default)]
+    pub slot_history: Vec<SlotChange>,
+    /// Fail-open timeout; defaults to `semaphore_timeout_seconds`.
+    #[serde(default)]
+    pub timeout_seconds: Option<f64>,
+    /// Polling interval; defaults to `semaphore_poll_seconds`.
+    #[serde(default)]
+    pub poll_seconds: Option<f64>,
+}
+
+/// A semaphore pool's slot count on one host from `at` onward.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlotChange {
+    /// Host index in the configured list.
+    pub host: usize,
+    /// Effective UTC time.
+    pub at: jiff::Timestamp,
+    /// Slots from this time onward.
+    pub slots: usize,
+}
+
+/// Index of the heavy pool among `Config::gate`.
+pub(crate) const HEAVY_GATE: usize = 0;
+
+/// One semaphore pool, resolved from either the legacy heavy keys or `semaphores`.
+pub(crate) struct Gate<'a> {
+    pub acquire: &'a [String],
+    pub release: &'a [String],
+    pub timeout: f64,
+    pub poll: f64,
 }
 impl Demand {
     /// Reservation used unchanged by the shared scheduling policy.
@@ -250,6 +308,7 @@ impl Config {
                 "invalid hosts, thresholds, pools or semaphore".into(),
             ));
         }
+        self.validate_semaphores()?;
         for (cores, ram) in self
             .hosts
             .iter()
@@ -295,6 +354,91 @@ impl Config {
             .get(host)
             .copied()
             .or(self.heavy_slots)
+    }
+    fn validate_semaphores(&self) -> Result<(), Error> {
+        let invalid = || Error::Invalid("invalid named semaphore pool".into());
+        for (i, s) in self.semaphores.iter().enumerate() {
+            if s.name.is_empty()
+                || s.name == "heavy"
+                || self.semaphores[..i].iter().any(|o| o.name == s.name)
+                || s.acquire_steps.is_empty()
+                || s.acquire_steps
+                    .iter()
+                    .chain(&s.release_steps)
+                    .any(String::is_empty)
+                || s.slots == Some(0)
+                || s.slots_per_host.len() > self.hosts.len()
+                || s.slots_per_host.contains(&0)
+                || s.slot_history
+                    .iter()
+                    .any(|c| c.host >= self.hosts.len() || c.slots == 0)
+                || s.timeout_seconds
+                    .is_some_and(|t| !t.is_finite() || t <= 0.0)
+                || s.poll_seconds.is_some_and(|p| !p.is_finite() || p < 0.0)
+            {
+                return Err(invalid());
+            }
+        }
+        for demand in
+            std::iter::once(&self.default_demand).chain(self.jobs.iter().map(|j| &j.demand))
+        {
+            if let Some(name) = &demand.semaphore
+                && (demand.heavy || !self.semaphores.iter().any(|s| &s.name == name))
+            {
+                return Err(Error::Invalid(
+                    "a job names an unknown semaphore pool or two pools".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    /// Pools in index order: the heavy pool from the legacy keys, then `semaphores`.
+    pub(crate) fn gate_count(&self) -> usize {
+        1 + self.semaphores.len()
+    }
+    pub(crate) fn gate(&self, gate: usize) -> Gate<'_> {
+        match gate.checked_sub(1).and_then(|i| self.semaphores.get(i)) {
+            Some(s) => Gate {
+                acquire: &s.acquire_steps,
+                release: &s.release_steps,
+                timeout: s.timeout_seconds.unwrap_or(self.semaphore_timeout_seconds),
+                poll: s.poll_seconds.unwrap_or(self.semaphore_poll_seconds),
+            },
+            None => Gate {
+                acquire: &self.semaphore_steps,
+                release: &self.semaphore_release_steps,
+                timeout: self.semaphore_timeout_seconds,
+                poll: self.semaphore_poll_seconds,
+            },
+        }
+    }
+    /// Configured slots before any history change; `None` leaves the host ungated.
+    pub(crate) fn gate_slots(&self, gate: usize, host: usize) -> Option<usize> {
+        match gate.checked_sub(1).and_then(|i| self.semaphores.get(i)) {
+            Some(s) => s.slots_per_host.get(host).copied().or(s.slots),
+            None => self.heavy_slots_on(host),
+        }
+    }
+    /// The pool gating a job with this demand, if any.
+    pub(crate) fn gate_of(&self, demand: &Demand) -> Option<usize> {
+        if demand.heavy {
+            return Some(HEAVY_GATE);
+        }
+        let name = demand.semaphore.as_deref()?;
+        self.semaphores
+            .iter()
+            .position(|s| s.name == name)
+            .map(|i| i + 1)
+    }
+    /// Counterfactual without any semaphore pool.
+    pub(crate) fn disable_gates(&mut self) {
+        self.heavy_slots = None;
+        self.heavy_slots_per_host.clear();
+        for s in &mut self.semaphores {
+            s.slots = None;
+            s.slots_per_host.clear();
+            s.slot_history.clear();
+        }
     }
 }
 

@@ -22,8 +22,8 @@ impl Engine<'_> {
                 Phase::Protected => {
                     let t = &mut self.timings[i];
                     if t.slot {
-                        if let Some(h) = t.host {
-                            self.slots[h] -= 1;
+                        if let (Some(h), Some(gate)) = (t.host, self.trace.jobs[i].gate) {
+                            self.slots[gate][h] -= 1;
                         }
                         t.slot = false;
                     }
@@ -58,8 +58,10 @@ impl Engine<'_> {
                 self.runner_slots[h][j.pool].release(runner);
                 self.nodes[h].free_runners[j.pool] = self.runner_slots[h][j.pool].free();
             }
-            if t.slot {
-                self.slots[h] -= 1;
+            if t.slot
+                && let Some(gate) = j.gate
+            {
+                self.slots[gate][h] -= 1;
             }
         }
         self.learn_completion(i);
